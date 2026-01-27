@@ -80,14 +80,18 @@ def get_live_bus_location(bus_line_id="72"):
                 
                 # Check if this is Bus 72
                 if line_ref is not None and line_ref.text == bus_line_id:
-                    loc = activity.find(".//siri:VehicleLocation", ns)
-                    lat = float(loc.find("siri:Latitude", ns).text)
-                    lon = float(loc.find("siri:Longitude", ns).text)
-                    print(f"   📡 FOUND LIVE BUS 72: {lat}, {lon}")
-                    return (lat, lon)
-        
-        print("   ⚠️ Bus 72 not found in live feed. Switching to simulation.")
-        return _get_simulated_location()
+                    # ✅ EXTRACT LATITUDE & LONGITUDE
+                    latitude = activity.find(".//siri:Latitude", ns)
+                    longitude = activity.find(".//siri:Longitude", ns)
+                    
+                    if latitude is not None and longitude is not None:
+                        lat = float(latitude.text)
+                        lon = float(longitude.text)
+                        print(f"   ✅ Found Bus {bus_line_id}: ({lat}, {lon})")
+                        return (lat, lon)
+            
+            print("   ⚠️ Bus 72 not found in live feed. Switching to simulation.")
+            return _get_simulated_location()
 
     except Exception as e:
         print(f"   ⚠️ Bus API Error: {e}. Switching to simulation.")
