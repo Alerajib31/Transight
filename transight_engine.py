@@ -126,7 +126,7 @@ def get_simulated_bus_location():
 def main_loop():
     print("\n📡 TRANSIGHT LIVE SYSTEM STARTED...")
     print("📍 Bus Route 72: Frenchay → Temple Meads")
-    print("🔄 Route cycles every 40 minutes\n")
+    print("⚠️ Using REAL BODS data ONLY (no simulation)\n")
     
     while True:
         conn = get_db_connection()
@@ -141,10 +141,16 @@ def main_loop():
             # --- INPUT 1: VISION (Crowd Analysis) ---
             crowd_count = analyze_crowd_smart(stop_data["video"])
             
-            # --- INPUT 2: BUS LOCATION & TRAFFIC ---
-            bus_lat, bus_lon, bus_location_name = get_simulated_bus_location()
+            # --- INPUT 2: BUS LOCATION & TRAFFIC (REAL ONLY) ---
+            try:
+                bus_lat, bus_lon, bus_location_name = api_services.get_live_bus_location("72")
+                print(f"   ✅ Got REAL bus location from BODS")
+            except Exception as e:
+                print(f"   ⚠️ BODS API failed: {e}")
+                print(f"   ⚠️ Skipping this cycle (waiting for bus to be in service)")
+                continue
             
-            # Calculate traffic delay based on bus distance from destination
+            # Calculate traffic delay based on REAL bus location
             traffic_delay = api_services.get_traffic_delay(
                 origin_lat=bus_lat, 
                 origin_lon=bus_lon,
@@ -153,7 +159,7 @@ def main_loop():
             )
             
             # --- INPUT 3: WEATHER (Simulated) ---
-            is_raining = 0  # Assume clear for demo
+            is_raining = 0
             
             # --- THE AI PREDICTION CORE ---
             if USING_AI:
@@ -165,15 +171,13 @@ def main_loop():
                 total_prediction = round(max(0, total_prediction), 1)
                 method_label = "🤖 AI Inference"
             else:
-                # Backup Formula: traffic + dwell time
                 dwell_time = (crowd_count * 4.0) / 60
                 total_prediction = round(traffic_delay + dwell_time, 1)
                 method_label = "🧮 Backup Formula"
 
-            # --- DWELL TIME CALCULATION ---
             dwell_display = round((crowd_count * 4.0) / 60, 1)
             
-            # --- SAVE TO DATABASE ---
+            # --- SAVE TO DATABASE (REAL DATA ONLY) ---
             query = """
                 INSERT INTO prediction_history 
                 (bus_stop_id, traffic_delay, dwell_delay, total_prediction, crowd_count, bus_lat, bus_lon)
@@ -192,9 +196,9 @@ def main_loop():
             
             # --- DISPLAY RESULTS ---
             print(f"   🚌  Bus 72 Location: {bus_location_name}")
-            print(f"       Coordinates: ({bus_lat:.4f}, {bus_lon:.4f})")
+            print(f"       Coordinates: ({bus_lat:.4f}, {bus_lon:.4f}) [REAL]")
             print(f"   👁️  Crowd Analysis: {crowd_count} people waiting")
-            print(f"   🚗  Traffic Delay: {traffic_delay} minutes")
+            print(f"   🚗  Traffic Delay: {traffic_delay} minutes [REAL]")
             print(f"   ⏱️  Dwell Time: {dwell_display} minutes")
             print(f"   ✅  PREDICTION ({method_label}): {total_prediction} minutes")
 
