@@ -43,11 +43,12 @@ def get_traffic_delay(origin_lat, origin_lon, dest_lat, dest_lon):
         "travelMode": "car"
     }
 
-    try:
-        response = requests.get(base_url, params=params, timeout=5)
-        data = response.json()
-        travel_time_seconds = data['routes'][0]['summary']['travelTimeInSeconds']
-        return round(travel_time_seconds / 60, 1)
+    print(f"🌐 Calling TomTom API...")
+    response = requests.get(base_url, params=params, timeout=5)
+    data = response.json()
+    print(f"✅ TomTom Response: {data}")  # ← Shows real API response
+    travel_time_seconds = data['routes'][0]['summary']['travelTimeInSeconds']
+    return round(travel_time_seconds / 60, 1)
         
     except Exception as e:
         print(f"⚠️ TomTom API Error: {e}")
