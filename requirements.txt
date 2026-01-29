@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+psycopg2-binary
+pandas
+xgboost
+opencv-python-headless
+ultralytics

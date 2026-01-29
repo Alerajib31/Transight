@@ -1,12 +1,18 @@
-import cv2
 import time
 import random
 import psycopg2
 import pandas as pd
 import api_services
-from ultralytics import YOLO
 from xgboost import XGBRegressor
 import os
+
+try:
+    import cv2
+    from ultralytics import YOLO
+    CV_AVAILABLE = True
+except ImportError:
+    print("⚠️  CV Modules not found (opencv-python, ultralytics). Using simulated crowd counts.")
+    CV_AVAILABLE = False
 
 # --- CONFIGURATION ---
 DB_PARAMS = {
@@ -51,7 +57,14 @@ print("🚀 INITIALIZING TRANSIGHT AI FUSION ENGINE...")
 
 # 1. LOAD COMPUTER VISION MODEL
 print("   👁️ Loading YOLOv8 Vision Model...")
-yolo_model = YOLO('yolov8n.pt')
+if CV_AVAILABLE:
+    try:
+        yolo_model = YOLO('yolov8n.pt')
+    except Exception as e:
+        print(f"   ⚠️ Error loading YOLO model: {e}")
+        CV_AVAILABLE = False
+else:
+    print("   ⚠️ CV not available. Skipping model load.")
 
 # 2. LOAD PREDICTIVE AI MODEL (Objective 3)
 print("   🧠 Loading XGBoost Prediction Brain...")
@@ -76,6 +89,10 @@ def analyze_crowd_smart(video_path):
     Smart Analyzer: Jumps to the middle of the video to avoid 
     empty frames at the start.
     """
+    if not CV_AVAILABLE:
+        # Fallback simulation if CV libraries are missing
+        return random.randint(0, 15)
+
     if not os.path.exists(video_path):
         print(f"      ❌ Video not found: {video_path}")
         return 0

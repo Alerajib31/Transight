@@ -11,12 +11,12 @@ print("\n1️⃣ TESTING BODS API (Real Bus Location)...")
 print("-" * 60)
 
 try:
-    # Call BODS API directly to see raw response
-    BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
-    url = f"https://data.bus-data.dft.gov.uk/api/v1/datafeed?operatorRef=FBAL&api_key={BODS_API_KEY}"
+    # Call BODS API directly to see raw response (Using Bounding Box for Bristol)
+    bbox = "-2.7,51.4,-2.5,51.55"
+    url = f"https://data.bus-data.dft.gov.uk/api/v1/datafeed?boundingBox={bbox}&api_key={api_services.BODS_API_KEY}"
     
     print(f"   Calling: {url[:80]}...")
-    response = requests.get(url, timeout=8)
+    response = requests.get(url, timeout=10)
     print(f"   Status Code: {response.status_code}")
     
     if response.status_code == 200:
@@ -57,6 +57,7 @@ try:
                         lon = float(longitude.text)
                         print(f"   ✅ FOUND Bus 72 at ({lat:.4f}, {lon:.4f})")
                         found = True
+                        bods_working = True
                         break
         
         if not found:
