@@ -51,38 +51,103 @@ function RecenterMap({ center }) {
 function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selectedStop, setSelectedStop] = useState("BST-001");
-  const [userLocation] = useState([51.4496, -2.5811]);
-  const [busLocation, setBusLocation] = useState([51.4545, -2.5879]);
+  const [selectedStop, setSelectedStop] = useState("STOP_001");
+  const [userLocation, setUserLocation] = useState([51.4496, -2.5811]);
+  const [busLocations, setBusLocations] = useState([]);
+  const [allStops, setAllStops] = useState([]);
+  const [nearbyStops, setNearbyStops] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const theme = useTheme();
   const isXSmall = useMediaQuery(theme.breakpoints.down('sm'));
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'lg'));
 
-  const API_BASE_URL = "http://127.0.0.1:8000/predict";
+  const API_BASE_URL = "http://127.0.0.1:8000";
 
+  // Fetch prediction for selected stop
   const fetchPrediction = async () => {
     setRefreshing(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/${selectedStop}`);
+      const response = await axios.get(`${API_BASE_URL}/predict/${selectedStop}`);
       setData(response.data);
-      if (response.data.bus_lat && response.data.bus_lon) {
-        setBusLocation([response.data.bus_lat, response.data.bus_lon]);
-      }
       setLoading(false);
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error fetching prediction:", error);
       setLoading(false);
     } finally {
       setRefreshing(false);
     }
   };
 
+  // Fetch all bus stops
+  const fetchAllStops = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/stops`);
+      setAllStops(response.data.stops || []);
+    } catch (error) {
+      console.error("Error fetching stops:", error);
+    }
+  };
+
+  // Fetch live bus locations
+  const fetchLiveBuses = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/live-buses`);
+      setBusLocations(response.data.buses || []);
+    } catch (error) {
+      console.error("Error fetching live buses:", error);
+    }
+  };
+
+  // Fetch nearby stops based on user location
+  const fetchNearbyStops = async (lat, lon) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/nearby-stops`, {
+        params: { latitude: lat, longitude: lon, radius: 2.0 }
+      });
+      setNearbyStops(response.data.nearby_stops || []);
+    } catch (error) {
+      console.error("Error fetching nearby stops:", error);
+    }
+  };
+
+  // Get user location
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          setUserLocation([latitude, longitude]);
+          fetchNearbyStops(latitude, longitude);
+        },
+        (error) => {
+          console.log("Geolocation unavailable:", error);
+          fetchNearbyStops(userLocation[0], userLocation[1]);
+        }
+      );
+    }
+  }, []);
+
+  // Fetch initial data
   useEffect(() => {
     fetchPrediction();
+    fetchAllStops();
+    fetchLiveBuses();
   }, [selectedStop]);
+
+  // Auto-refresh every 10 seconds
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(() => {
+      fetchPrediction();
+      fetchLiveBuses();
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [autoRefresh, selectedStop]);
 
   const handleStopChange = (event) => {
     setSelectedStop(event.target.value);
@@ -90,10 +155,14 @@ function App() {
   };
 
   const getETATime = () => {
-    if (!data) return '';
-    const now = new Date();
-    now.setMinutes(now.getMinutes() + Math.round(data.total_time_min));
-    return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    if (!data?.eta_time) return '';
+    return data.eta_time;
+  };
+
+  const getStatusColor = (crowdLevel, totalTime) => {
+    if (totalTime > 15) return '#ef4444';  // Red
+    if (totalTime > 10) return '#f97316';  // Orange
+    return '#22c55e';  // Green
   };
 
   const PredictionCard = ({ compact = false }) => (
@@ -103,20 +172,20 @@ function App() {
       </Box>
     ) : data ? (
       <Slide direction="up" in={true}>
-        <Paper elevation={0} sx={{ borderRadius: compact ? 2 : 3, overflow: 'hidden', background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+        <Paper elevation={0} sx={{ borderRadius: compact ? 2 : 3, overflow: 'hidden', background: `linear-gradient(135deg, ${getStatusColor(data.crowd_level, data.total_time_min)} 0%, ${getStatusColor(data.crowd_level, data.total_time_min)}cc 100%)`, border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
           <Box className="orb" sx={{ position: 'absolute', top: '-50px', right: '-50px', width: '200px', height: '200px', background: 'radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%)', borderRadius: '50%', filter: 'blur(40px)' }} />
           <CardContent sx={{ p: compact ? 2 : 3, position: 'relative', zIndex: 1 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={compact ? 1 : 2}>
               <Box>
                 <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', letterSpacing: '1px' }}>LIVE PREDICTION</Typography>
-                <Typography variant={compact ? "body2" : "h6"} fontWeight={800} sx={{ color: 'white', mt: 0.5 }}>Stop {data.stop_id}</Typography>
+                <Typography variant={compact ? "body2" : "h6"} fontWeight={800} sx={{ color: 'white', mt: 0.5 }}>{data.stop_name}</Typography>
               </Box>
               <NotificationsActiveIcon className="pulse-icon" sx={{ color: 'white', fontSize: compact ? 20 : 24 }} />
             </Box>
 
             <Paper elevation={0} sx={{ background: 'rgba(255,255,255,0.95)', p: compact ? 1.5 : 2.5, borderRadius: 2, textAlign: 'center', mb: compact ? 1.5 : 2, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-              <Typography sx={{ fontWeight: 900, fontSize: compact ? '2rem' : '3.5rem', background: data.total_time_min > 10 ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' : 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', lineHeight: 1, mb: 0.5 }}>
-                {Math.round(data.total_time_min)}
+              <Typography sx={{ fontWeight: 900, fontSize: compact ? '2rem' : '3.5rem', color: getStatusColor(data.crowd_level, data.total_time_min), lineHeight: 1, mb: 0.5 }}>
+                {data.total_time_min}
               </Typography>
               <Typography variant={compact ? "caption" : "body2"} sx={{ color: '#64748b', fontWeight: 600, mb: compact ? 0.5 : 1 }}>minutes</Typography>
               <Divider sx={{ my: compact ? 0.5 : 1 }} />
@@ -146,20 +215,20 @@ function App() {
             <Paper elevation={0} sx={{ bgcolor: 'rgba(255,255,255,0.1)', p: compact ? 1.5 : 2, borderRadius: 2, backdropFilter: 'blur(10px)', mb: compact ? 1 : 1.5 }}>
               <Box display="flex" alignItems="center" gap={1} mb={1}>
                 <TimerIcon sx={{ color: '#fbbf24', fontSize: compact ? 16 : 20 }} />
-                <Typography variant={compact ? "caption" : "body2"} fontWeight={700} sx={{ color: 'white' }}>Bus Delays</Typography>
+                <Typography variant={compact ? "caption" : "body2"} fontWeight={700} sx={{ color: 'white' }}>Delay Breakdown</Typography>
               </Box>
               <Grid container spacing={compact ? 0.5 : 1}>
                 <Grid item xs={6}>
                   <Box sx={{ textAlign: 'center', bgcolor: 'rgba(0,0,0,0.2)', p: compact ? 0.8 : 1, borderRadius: 1.5 }}>
                     <TrafficIcon sx={{ color: '#f87171', fontSize: compact ? 14 : 18 }} />
-                    <Typography variant={compact ? "caption" : "body2"} fontWeight={800} sx={{ color: 'white', display: 'block' }}>{Math.round(data.traffic_delay || 0)} min</Typography>
+                    <Typography variant={compact ? "caption" : "body2"} fontWeight={800} sx={{ color: 'white', display: 'block' }}>{data.traffic_delay.toFixed(1)} min</Typography>
                     <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', fontSize: compact ? '0.6rem' : '0.7rem' }}>Traffic</Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={6}>
                   <Box sx={{ textAlign: 'center', bgcolor: 'rgba(0,0,0,0.2)', p: compact ? 0.8 : 1, borderRadius: 1.5 }}>
                     <ScheduleIcon sx={{ color: '#60a5fa', fontSize: compact ? 14 : 18 }} />
-                    <Typography variant={compact ? "caption" : "body2"} fontWeight={800} sx={{ color: 'white', display: 'block' }}>{Math.round(data.dwell_delay || 0)} min</Typography>
+                    <Typography variant={compact ? "caption" : "body2"} fontWeight={800} sx={{ color: 'white', display: 'block' }}>{data.dwell_delay.toFixed(1)} min</Typography>
                     <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', fontSize: compact ? '0.6rem' : '0.7rem' }}>Boarding</Typography>
                   </Box>
                 </Grid>
@@ -167,7 +236,7 @@ function App() {
             </Paper>
 
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'rgba(255,255,255,0.1)', p: compact ? 1 : 1.5, borderRadius: 2, backdropFilter: 'blur(10px)' }}>
-              <Typography variant={compact ? "caption" : "body2"} sx={{ color: 'white', fontWeight: 600 }}>Crowd</Typography>
+              <Typography variant={compact ? "caption" : "body2"} sx={{ color: 'white', fontWeight: 600 }}>Confidence: {(data.confidence * 100).toFixed(0)}%</Typography>
               <Chip label={data.crowd_level} size={compact ? "small" : "medium"} sx={{ bgcolor: data.crowd_level === "High" ? '#ef4444' : '#22c55e', color: 'white', fontWeight: 700, fontSize: compact ? '0.7rem' : '0.8rem' }}/>
             </Box>
           </CardContent>
@@ -187,12 +256,25 @@ function App() {
             </Box>
             <Box sx={{ minWidth: 0 }}>
               <Typography variant={isXSmall ? "body2" : "h6"} fontWeight={800} sx={{ color: 'white', whiteSpace: 'nowrap' }}>Transight AI</Typography>
-              {!isXSmall && <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', display: 'block' }}>Route 72</Typography>}
+              {!isXSmall && <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', display: 'block' }}>Real-Time Prediction</Typography>}
             </Box>
           </Box>
-          <IconButton onClick={fetchPrediction} size={isXSmall ? "small" : "medium"} sx={{ bgcolor: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)', '&:hover': { bgcolor: 'rgba(99, 102, 241, 0.2)' }, flexShrink: 0 }}>
-            <RefreshIcon sx={{ color: '#6366f1', animation: refreshing ? 'rotate 1s linear infinite' : 'none', '@keyframes rotate': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } }} />
-          </IconButton>
+          <Box display="flex" gap={1}>
+            <IconButton 
+              onClick={() => setAutoRefresh(!autoRefresh)} 
+              size={isXSmall ? "small" : "medium"} 
+              sx={{ bgcolor: autoRefresh ? 'rgba(34, 197, 94, 0.2)' : 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)', '&:hover': { bgcolor: 'rgba(99, 102, 241, 0.2)' }, flexShrink: 0 }}
+            >
+              <NavigationIcon sx={{ color: autoRefresh ? '#22c55e' : '#6366f1' }} />
+            </IconButton>
+            <IconButton 
+              onClick={fetchPrediction} 
+              size={isXSmall ? "small" : "medium"} 
+              sx={{ bgcolor: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.3)', '&:hover': { bgcolor: 'rgba(99, 102, 241, 0.2)' }, flexShrink: 0 }}
+            >
+              <RefreshIcon sx={{ color: '#6366f1', animation: refreshing ? 'rotate 1s linear infinite' : 'none', '@keyframes rotate': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } }} />
+            </IconButton>
+          </Box>
         </Toolbar>
         {refreshing && <LinearProgress sx={{ bgcolor: 'rgba(99, 102, 241, 0.1)', height: 2 }} />}
       </AppBar>
@@ -200,7 +282,7 @@ function App() {
       {/* MAIN CONTENT */}
       <Box sx={{ display: 'flex', flex: 1, width: '100%', gap: 0, overflow: 'hidden' }}>
         
-        {/* DESKTOP/TABLET SIDEBAR - HIDDEN ON XSMALL MOBILE */}
+        {/* DESKTOP/TABLET SIDEBAR */}
         {!isMobile && (
           <Box sx={{ width: isTablet ? '45%' : '420px', height: '100%', overflowY: 'auto', background: 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)', borderRight: '1px solid rgba(99, 102, 241, 0.2)', p: isTablet ? 2 : 3, '&::-webkit-scrollbar': { width: '8px' }, '&::-webkit-scrollbar-track': { background: 'rgba(0,0,0,0.1)' }, '&::-webkit-scrollbar-thumb': { background: 'rgba(99, 102, 241, 0.5)', borderRadius: '4px' }, flexShrink: 0 }}>
             <Stack spacing={isTablet ? 2 : 2.5}>
@@ -209,11 +291,40 @@ function App() {
                 <FormControl fullWidth size={isTablet ? "small" : "medium"}>
                   <InputLabel sx={{ color: 'rgba(255,255,255,0.7)' }}>Bus Stop</InputLabel>
                   <Select value={selectedStop} label="Bus Stop" onChange={handleStopChange} sx={{ borderRadius: 2, color: 'white', '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(99, 102, 241, 0.3)' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(99, 102, 241, 0.5)' }, '& .MuiSvgIcon-root': { color: 'white' } }}>
-                    <MenuItem value="BST-001">🚏 Temple Meads Station</MenuItem>
-                    <MenuItem value="BST-002">🚏 Cabot Circus</MenuItem>
+                    {allStops.map((stop) => (
+                      <MenuItem key={stop.stop_id} value={stop.stop_id}>
+                        🚏 {stop.name}
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Paper>
+
+              {/* NEARBY STOPS */}
+              {nearbyStops.length > 0 && (
+                <Paper elevation={0} sx={{ p: isTablet ? 1.5 : 2, borderRadius: 2, background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)', border: '1px solid rgba(59, 130, 246, 0.3)', backdropFilter: 'blur(10px)' }}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+                    <NavigationIcon sx={{ color: '#3b82f6', fontSize: isTablet ? 18 : 22 }} />
+                    <Typography variant={isTablet ? "subtitle2" : "body2"} fontWeight={700} sx={{ color: 'white' }}>Nearby Stops</Typography>
+                  </Box>
+                  <Stack spacing={1}>
+                    {nearbyStops.slice(0, 3).map((stop) => (
+                      <Box 
+                        key={stop.stop_id}
+                        onClick={() => setSelectedStop(stop.stop_id)}
+                        sx={{ p: 1, borderRadius: 1.5, bgcolor: 'rgba(0,0,0,0.2)', cursor: 'pointer', '&:hover': { bgcolor: 'rgba(59, 130, 246, 0.2)' }, transition: 'all 0.2s' }}
+                      >
+                        <Typography variant="caption" fontWeight={700} sx={{ color: 'white' }}>
+                          {stop.name}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', display: 'block' }}>
+                          {stop.distance_km} km away
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
 
               {/* LOCATION INFO */}
               <Paper elevation={0} sx={{ p: isTablet ? 1.5 : 2, borderRadius: 2, background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%)', border: '1px solid rgba(34, 197, 94, 0.3)', backdropFilter: 'blur(10px)' }}>
@@ -222,15 +333,33 @@ function App() {
                   <Typography variant={isTablet ? "subtitle2" : "body2"} fontWeight={700} sx={{ color: 'white' }}>Your Location</Typography>
                 </Box>
                 <Box sx={{ fontFamily: 'monospace', fontSize: isTablet ? '0.7rem' : '0.8rem', color: 'rgba(255,255,255,0.8)', bgcolor: 'rgba(0,0,0,0.2)', p: isTablet ? 1 : 1.5, borderRadius: 2, mb: 1 }}>
-                  <Box>📍 Temple Meads Station</Box>
-                  <Box>Lat: {userLocation[0].toFixed(4)}</Box>
-                  <Box>Lng: {userLocation[1].toFixed(4)}</Box>
+                  <Box>📍 {userLocation[0].toFixed(4)}°</Box>
+                  <Box>{userLocation[1].toFixed(4)}°</Box>
                 </Box>
-                <Chip label="📍 Fixed Location" size="small" sx={{ bgcolor: 'rgba(0,0,0,0.3)', color: 'white', fontWeight: 600, fontSize: '0.65rem' }}/>
               </Paper>
 
               {/* PREDICTION CARD */}
               <PredictionCard compact={isTablet} />
+              
+              {/* LIVE BUSES INFO */}
+              {busLocations.length > 0 && (
+                <Paper elevation={0} sx={{ p: isTablet ? 1.5 : 2, borderRadius: 2, background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%)', border: '1px solid rgba(168, 85, 247, 0.3)', backdropFilter: 'blur(10px)' }}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <DirectionsBusIcon sx={{ color: '#a855f7', fontSize: isTablet ? 18 : 22 }} />
+                    <Typography variant={isTablet ? "subtitle2" : "body2"} fontWeight={700} sx={{ color: 'white' }}>Live Buses ({busLocations.length})</Typography>
+                  </Box>
+                  <Stack spacing={1}>
+                    {busLocations.slice(0, 3).map((bus) => (
+                      <Box key={bus.bus_id} sx={{ p: 1, borderRadius: 1.5, bgcolor: 'rgba(0,0,0,0.2)', fontSize: '0.75rem' }}>
+                        <Typography variant="caption" fontWeight={700} sx={{ color: '#a855f7' }}>Bus {bus.bus_id}</Typography>
+                        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', display: 'block' }}>
+                          Route {bus.route} • {bus.speed} km/h
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
             </Stack>
           </Box>
         )}
@@ -240,30 +369,72 @@ function App() {
           <MapContainer center={userLocation} zoom={15} style={{ height: "100%", width: "100%" }} zoomControl={!isXSmall}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
             <RecenterMap center={userLocation} />
+            
+            {/* User Location */}
             <Marker position={userLocation} icon={userIcon}>
               <Popup>
                 <Box sx={{ p: 1 }}>
-                  <Typography variant="subtitle2" fontWeight={700}>📍 Temple Meads</Typography>
+                  <Typography variant="subtitle2" fontWeight={700}>📍 Your Location</Typography>
                   <Divider sx={{ my: 1 }} />
                   <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>{userLocation[0].toFixed(4)}, {userLocation[1].toFixed(4)}</Typography>
                 </Box>
               </Popup>
             </Marker>
-            {busLocation && <Marker position={busLocation} icon={busIcon}>
-              <Popup>
-                <Box sx={{ p: 1 }}>
-                  <Typography variant="subtitle2" fontWeight={700}>🚌 Bus 72</Typography>
-                  <Divider sx={{ my: 1 }} />
-                  <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>{busLocation[0].toFixed(4)}, {busLocation[1].toFixed(4)}</Typography>
-                </Box>
-              </Popup>
-            </Marker>}
-            <Circle center={userLocation} radius={500} pathOptions={{ color: 'rgba(34, 197, 94, 0.3)', weight: 2, fillOpacity: 0.1 }} />
-            {busLocation && <Circle center={busLocation} radius={300} pathOptions={{ color: 'rgba(99, 102, 241, 0.3)', weight: 2, fillOpacity: 0.1 }} />}
-            {busLocation && <Polyline positions={[userLocation, busLocation]} pathOptions={{ color: '#6366f1', weight: 2, opacity: 0.6, dashArray: '5, 5' }} />}
+
+            {/* All Bus Stops */}
+            {allStops.map((stop) => (
+              <Marker key={stop.stop_id} position={[stop.latitude, stop.longitude]} icon={L.icon({
+                iconUrl: 'https://cdn-icons-png.flaticon.com/512/1524/1524822.png',
+                iconSize: [35, 35],
+              })}>
+                <Popup>
+                  <Box sx={{ p: 1, minWidth: '150px' }}>
+                    <Typography variant="subtitle2" fontWeight={700}>{stop.name}</Typography>
+                    <Divider sx={{ my: 0.5 }} />
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace', display: 'block' }}>
+                      Routes: {stop.routes.join(', ')}
+                    </Typography>
+                  </Box>
+                </Popup>
+              </Marker>
+            ))}
+
+            {/* Live Buses */}
+            {busLocations.map((bus) => (
+              <Marker key={bus.bus_id} position={[bus.latitude, bus.longitude]} icon={busIcon}>
+                <Popup>
+                  <Box sx={{ p: 1 }}>
+                    <Typography variant="subtitle2" fontWeight={700}>🚌 Bus {bus.bus_id}</Typography>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="caption" sx={{ display: 'block' }}>
+                      Route: {bus.route}
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block' }}>
+                      Speed: {bus.speed} km/h
+                    </Typography>
+                  </Box>
+                </Popup>
+              </Marker>
+            ))}
+
+            {/* Service Radius Circles */}
+            {allStops.map((stop) => (
+              <Circle 
+                key={`circle-${stop.stop_id}`}
+                center={[stop.latitude, stop.longitude]} 
+                radius={200} 
+                pathOptions={{ color: 'rgba(99, 102, 241, 0.3)', weight: 2, fillOpacity: 0.1 }} 
+              />
+            ))}
+
+            {/* Connection Lines */}
+            {busLocations.length > 0 && <Polyline 
+              positions={busLocations.map(bus => [bus.latitude, bus.longitude])} 
+              pathOptions={{ color: '#a855f7', weight: 1, opacity: 0.4, dashArray: '5, 5' }} 
+            />}
           </MapContainer>
 
-          {/* MOBILE BOTTOM SHEET - XSMALL ONLY */}
+          {/* MOBILE BOTTOM SHEET */}
           {isXSmall && (
             <SwipeableDrawer
               anchor="bottom"
@@ -274,12 +445,13 @@ function App() {
             >
               <Box sx={{ p: 2, width: '100%', maxHeight: '60vh', overflowY: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { background: 'rgba(0,0,0,0.1)' }, '&::-webkit-scrollbar-thumb': { background: 'rgba(99, 102, 241, 0.5)', borderRadius: '3px' } }}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Typography variant="body2" fontWeight={700} sx={{ color: 'white' }}>Prediction Details</Typography>
+                  <Typography variant="body2" fontWeight={700} sx={{ color: 'white' }}>Prediction</Typography>
                   <FormControl size="small" sx={{ minWidth: 150 }}>
                     <InputLabel sx={{ color: 'rgba(255,255,255,0.7)' }}>Stop</InputLabel>
                     <Select value={selectedStop} label="Stop" onChange={handleStopChange} sx={{ borderRadius: 1, color: 'white', '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(99, 102, 241, 0.3)' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(99, 102, 241, 0.5)' }, '& .MuiSvgIcon-root': { color: 'white' } }}>
-                      <MenuItem value="BST-001">🚏 Temple Meads</MenuItem>
-                      <MenuItem value="BST-002">🚏 Cabot Circus</MenuItem>
+                      {allStops.map((stop) => (
+                        <MenuItem key={stop.stop_id} value={stop.stop_id}>🚏 {stop.name}</MenuItem>
+                      ))}
                     </Select>
                   </FormControl>
                 </Box>
@@ -300,6 +472,7 @@ function App() {
       </style>
     </Box>
   );
+}
 }
 
 export default App;
