@@ -1,0 +1,35 @@
+{
+  "system": {
+    "backend_url": "http://localhost:8000",
+    "update_interval_seconds": 5,
+    "frame_skip": 2,
+    "display_width": 800
+  },
+  "bus_stops": [
+    {
+      "stop_id": "STOP_001",
+      "name": "Downtown Station",
+      "route_ids": [10, 15, 22],
+      "latitude": 51.4496,
+      "longitude": -2.5811,
+      "camera": {
+        "type": "video",
+        "source": "1.mp4",
+        "roi_boundary": 0.6
+      }
+    },
+    {
+      "stop_id": "STOP_002",
+      "name": "Airport Stop",
+      "route_ids": [101, 102],
+      "latitude": 51.4450,
+      "longitude": -2.5800,
+      "camera": {
+        "type": "video",
+        "source": "2.mp4",
+        "roi_boundary": 0.6
+      }
+    }
+  ],
+  "notes": "For live cameras, change type to 'usb' and source to camera index (0, 1), or 'rtsp' for IP cameras"
+}
