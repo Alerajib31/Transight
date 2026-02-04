@@ -339,7 +339,7 @@ def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: fl
         return BUSES_CACHE.get("buses", {})
 
 def get_buses_for_stop(stop_id: str, lat: float, lon: float):
-    """Get buses approaching a specific stop with real-time positions"""
+    """Get buses approaching a specific stop with real-time positions and trail"""
     # Find the stop
     all_stops = get_all_bristol_stops()
     stop = None
@@ -356,7 +356,7 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
     
     # Find buses heading to or near this stop
     stop_buses = []
-    for bus in all_buses.values():
+    for bus_id, bus in all_buses.items():
         next_stop_ref = bus.get("next_stop_ref", "")
         
         # Check if heading to this stop
@@ -364,12 +364,19 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
         
         # Check distance to this stop
         dist_to_stop = haversine(stop["longitude"], stop["latitude"], bus["longitude"], bus["latitude"])
-        is_near_stop = dist_to_stop < 2.0  # Within 2km
+        is_near_stop = dist_to_stop < 2.5  # Within 2.5km
         
         if is_heading_to_stop or is_near_stop:
             bus_copy = dict(bus)
             bus_copy["distance_to_stop"] = round(dist_to_stop, 2)
             bus_copy["distance_to_user"] = round(haversine(lon, lat, bus["longitude"], bus["latitude"]), 2)
+            
+            # Include trail if available
+            if bus_id in BUS_HISTORY and len(BUS_HISTORY[bus_id]) > 1:
+                bus_copy["trail"] = BUS_HISTORY[bus_id][-20:]  # Last 20 positions
+            else:
+                bus_copy["trail"] = []
+            
             stop_buses.append(bus_copy)
     
     # Sort by ETA (estimated based on distance)
