@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import {
   Box, CircularProgress, IconButton, Typography, TextField,
-  Paper, Chip, Avatar, Button
+  Paper, Chip, Avatar
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
@@ -26,7 +26,6 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// User location icon
 const userIcon = L.divIcon({
   html: `<div style="
     width: 20px; height: 20px;
@@ -38,7 +37,6 @@ const userIcon = L.divIcon({
   className: 'user-icon'
 });
 
-// Stop icon
 const stopIcon = (isSelected) => L.divIcon({
   html: `<div style="
     width: ${isSelected ? 44 : 36}px; height: ${isSelected ? 44 : 36}px;
@@ -55,20 +53,19 @@ const stopIcon = (isSelected) => L.divIcon({
   className: 'stop-icon'
 });
 
-// Bus icon
-const busIcon = (route, color, bearing, isSelected) => L.divIcon({
+const busIcon = (route, color, bearing) => L.divIcon({
   html: `<div style="
-    width: ${isSelected ? 56 : 42}px; height: ${isSelected ? 56 : 42}px;
-    background: ${color}; border: ${isSelected ? 4 : 3}px solid white;
+    width: 52px; height: 52px;
+    background: ${color}; border: 4px solid white;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    color: white; font-weight: bold; font-size: ${isSelected ? 16 : 12}px;
-    box-shadow: 0 ${isSelected ? 6 : 3}px ${isSelected ? 20 : 10}px rgba(0,0,0,${isSelected ? 0.6 : 0.4});
+    color: white; font-weight: bold; font-size: 14px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
     transform: rotate(${bearing || 0}deg);
-    z-index: ${isSelected ? 1000 : 100};
+    z-index: 1000;
   ">${route}</div>`,
-  iconSize: [isSelected ? 56 : 42, isSelected ? 56 : 42],
-  iconAnchor: [isSelected ? 28 : 21, isSelected ? 28 : 21],
+  iconSize: [52, 52],
+  iconAnchor: [26, 26],
   className: 'bus-icon'
 });
 
@@ -82,7 +79,6 @@ const getRouteColor = (route) => {
 const formatTime = (mins) => mins <= 1 ? 'Due' : `${Math.round(mins)} min`;
 const formatDist = (km) => km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 
-// Map with selected bus and its trail
 function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onStopClick }) {
   const mapRef = useRef(null);
   const initialized = useRef(false);
@@ -94,14 +90,12 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
     }
   }, [userLocation]);
   
-  // Pan to bus when selected
   useEffect(() => {
     if (selectedBus && mapRef.current) {
-      mapRef.current.setView([selectedBus.latitude, selectedBus.longitude], 16);
+      mapRef.current.setView([selectedBus.latitude, selectedBus.longitude], 15);
     }
   }, [selectedBus?.bus_id]);
   
-  // Build trail for selected bus
   const busTrail = selectedBus?.trail?.length > 1 
     ? selectedBus.trail.map(p => [p.lat, p.lon])
     : [];
@@ -122,65 +116,60 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
         </Marker>
       )}
       
-      {/* Show stops in map mode */}
       {viewMode === 'stops' && stops.map(stop => (
         <Marker
           key={stop.atco_code}
           position={[stop.latitude, stop.longitude]}
           icon={stopIcon(selectedStop?.atco_code === stop.atco_code)}
           eventHandlers={{ click: () => onStopClick(stop) }}
-          zIndexOffset={selectedStop?.atco_code === stop.atco_code ? 500 : 0}
-        >
-          <Popup>
-            <Typography variant="subtitle2" fontWeight={700}>{stop.common_name}</Typography>
-            <Typography variant="caption">{stop.locality}</Typography>
-          </Popup>
-        </Marker>
+        />
       ))}
       
-      {/* Show selected stop marker in bus detail mode */}
       {viewMode === 'bus-detail' && selectedStop && (
-        <Marker
-          position={[selectedStop.latitude, selectedStop.longitude]}
-          icon={stopIcon(true)}
-        >
-          <Popup>
-            <Typography variant="subtitle2" fontWeight={700}>{selectedStop.common_name}</Typography>
-          </Popup>
-        </Marker>
+        <Marker position={[selectedStop.latitude, selectedStop.longitude]} icon={stopIcon(true)} />
       )}
       
-      {/* BUS TRAIL - Blue line showing bus path */}
+      {/* BUS ROUTE PATH - Thick blue line */}
       {viewMode === 'bus-detail' && busTrail.length > 1 && (
-        <Polyline
-          positions={busTrail}
-          pathOptions={{ 
-            color: '#3b82f6', 
-            weight: 5, 
-            opacity: 0.8,
-            lineCap: 'round',
-            lineJoin: 'round'
-          }}
-        />
+        <>
+          {/* Background line for better visibility */}
+          <Polyline
+            positions={busTrail}
+            pathOptions={{ 
+              color: 'white', 
+              weight: 10, 
+              opacity: 0.8,
+              lineCap: 'round',
+              lineJoin: 'round'
+            }}
+          />
+          {/* Main blue line */}
+          <Polyline
+            positions={busTrail}
+            pathOptions={{ 
+              color: '#3b82f6', 
+              weight: 6, 
+              opacity: 1,
+              lineCap: 'round',
+              lineJoin: 'round'
+            }}
+          />
+        </>
       )}
       
-      {/* Selected bus marker */}
       {viewMode === 'bus-detail' && selectedBus && (
         <Marker
           position={[selectedBus.latitude, selectedBus.longitude]}
-          icon={busIcon(selectedBus.route, getRouteColor(selectedBus.route), selectedBus.bearing, true)}
+          icon={busIcon(selectedBus.route, getRouteColor(selectedBus.route), selectedBus.bearing)}
           zIndexOffset={2000}
         >
           <Popup>
             <Box sx={{ minWidth: 180 }}>
               <Typography variant="h6" fontWeight={700}>{selectedBus.route}</Typography>
-              <Typography variant="subtitle2">→ {selectedBus.destination}</Typography>
-              <Typography variant="caption" display="block" sx={{ mt: 1 }}>{selectedBus.operator}</Typography>
-              <Chip 
-                size="small" 
-                label={selectedBus.delay_minutes > 0 ? `${selectedBus.delay_minutes}m late` : 'On time'}
-                sx={{ mt: 1, bgcolor: selectedBus.delay_minutes > 0 ? '#fee2e2' : '#d1fae5', color: selectedBus.delay_minutes > 0 ? '#dc2626' : '#059669' }}
-              />
+              <Typography>→ {selectedBus.destination}</Typography>
+              <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                Speed: {Math.round(selectedBus.speed || 0)} km/h
+              </Typography>
             </Box>
           </Popup>
         </Marker>
@@ -202,11 +191,12 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   
-  // Bottom sheet height for dragging
-  const [sheetHeight, setSheetHeight] = useState(400);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartY = useRef(0);
-  const dragStartHeight = useRef(400);
+  // Bottom sheet state
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+  const sheetRef = useRef(null);
+  const startY = useRef(0);
+  const currentY = useRef(0);
   
   const API_BASE_URL = "http://127.0.0.1:8000";
   
@@ -239,7 +229,6 @@ function App() {
   
   const fetchStopBuses = useCallback(async (stop) => {
     if (!stop || !userLocation) return;
-    
     setLoading(true);
     try {
       const res = await axios.get(`${API_BASE_URL}/stop/${stop.atco_code}/buses`, {
@@ -255,12 +244,12 @@ function App() {
   }, [userLocation]);
   
   useEffect(() => {
-    if (viewMode !== 'stops' && selectedStop) {
-      fetchStopBuses(selectedStop);
-      const interval = setInterval(() => fetchStopBuses(selectedStop), 10000);
-      return () => clearInterval(interval);
-    }
-  }, [viewMode, selectedStop, fetchStopBuses]);
+    if (!sheetOpen || !selectedStop) return;
+    
+    fetchStopBuses(selectedStop);
+    const interval = setInterval(() => fetchStopBuses(selectedStop), 10000);
+    return () => clearInterval(interval);
+  }, [sheetOpen, selectedStop, fetchStopBuses]);
   
   const handleSearch = async (query) => {
     setSearchQuery(query);
@@ -285,52 +274,44 @@ function App() {
   const handleStopClick = (stop) => {
     setSelectedStop(stop);
     setViewMode('bus-list');
-    setSheetHeight(400);
+    setSheetOpen(true);
+    setSheetExpanded(false);
     fetchStopBuses(stop);
   };
   
   const handleBusClick = (bus) => {
     setSelectedBus(bus);
     setViewMode('bus-detail');
-    setSheetHeight(350);
+    setSheetExpanded(false);
   };
   
   const handleBack = () => {
     if (viewMode === 'bus-detail') {
       setSelectedBus(null);
       setViewMode('bus-list');
-      setSheetHeight(400);
     } else {
       setSelectedStop(null);
       setStopBuses([]);
+      setSheetOpen(false);
       setViewMode('stops');
     }
   };
   
-  // Drag handlers
-  const handleDragStart = (e) => {
-    setIsDragging(true);
-    dragStartY.current = e.touches ? e.touches[0].clientY : e.clientY;
-    dragStartHeight.current = sheetHeight;
+  // Touch handlers for smooth sheet dragging
+  const handleTouchStart = (e) => {
+    startY.current = e.touches[0].clientY;
   };
   
-  const handleDragMove = (e) => {
-    if (!isDragging) return;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const delta = dragStartY.current - clientY;
-    const newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, dragStartHeight.current + delta));
-    setSheetHeight(newHeight);
+  const handleTouchMove = (e) => {
+    currentY.current = e.touches[0].clientY;
   };
   
-  const handleDragEnd = () => {
-    setIsDragging(false);
-    // Snap to positions
-    if (sheetHeight < 250) {
-      setSheetHeight(200); // Minimized
-    } else if (sheetHeight > 500) {
-      setSheetHeight(window.innerHeight * 0.7); // Expanded
-    } else {
-      setSheetHeight(400); // Default
+  const handleTouchEnd = () => {
+    const diff = startY.current - currentY.current;
+    if (diff > 50) {
+      setSheetExpanded(true); // Swipe up
+    } else if (diff < -50) {
+      setSheetExpanded(false); // Swipe down
     }
   };
   
@@ -338,6 +319,7 @@ function App() {
     <Box sx={{ width: '100%', height: '100vh', position: 'relative', overflow: 'hidden' }}>
       <style>{`
         .user-icon, .stop-icon, .bus-icon { background: transparent !important; border: none !important; }
+        .sheet-transition { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
       `}</style>
       
       {/* Map */}
@@ -411,71 +393,61 @@ function App() {
         </Paper>
       </Box>
       
-      {/* Status */}
-      <Paper sx={{ position: 'absolute', top: 80, left: 16, px: 2, py: 1, zIndex: 500 }}>
-        <Typography variant="body2" fontWeight={600}>
-          {viewMode === 'stops' && `${allStops.length} stops`}
-          {viewMode === 'bus-list' && `${selectedStop?.common_name}`}
-          {viewMode === 'bus-detail' && `Bus ${selectedBus?.route} → ${selectedBus?.destination}`}
-        </Typography>
-      </Paper>
-      
       {/* My Location */}
       <IconButton
-        sx={{ position: 'absolute', bottom: viewMode === 'stops' ? 100 : sheetHeight + 20, right: 16, bgcolor: 'white', boxShadow: 2, zIndex: 500 }}
+        sx={{ position: 'absolute', bottom: sheetOpen ? (sheetExpanded ? '80%' : '50%') : 100, right: 16, bgcolor: 'white', boxShadow: 2, zIndex: 500 }}
       >
         <MyLocationIcon />
       </IconButton>
       
       {/* Draggable Bottom Sheet */}
-      {viewMode !== 'stops' && (
-        <Paper 
-          sx={{ 
-            position: 'absolute', 
-            bottom: 0, 
-            left: 0, 
-            right: 0, 
-            height: sheetHeight,
+      {sheetOpen && (
+        <Box
+          ref={sheetRef}
+          className="sheet-transition"
+          sx={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: sheetExpanded ? '80%' : '50%',
+            bgcolor: 'white',
             borderRadius: '24px 24px 0 0',
-            overflow: 'hidden',
             zIndex: 1000,
-            transition: isDragging ? 'none' : 'height 0.3s ease',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            boxShadow: '0 -4px 20px rgba(0,0,0,0.15)'
           }}
         >
           {/* Drag Handle */}
           <Box 
-            onMouseDown={handleDragStart}
-            onMouseMove={handleDragMove}
-            onMouseUp={handleDragEnd}
-            onMouseLeave={handleDragEnd}
-            onTouchStart={handleDragStart}
-            onTouchMove={handleDragMove}
-            onTouchEnd={handleDragEnd}
+            onClick={() => setSheetExpanded(!sheetExpanded)}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
             sx={{ 
               display: 'flex', 
               justifyContent: 'center', 
-              pt: 1.5, 
+              pt: 2, 
               pb: 1,
-              cursor: 'grab',
-              '&:active': { cursor: 'grabbing' }
+              cursor: 'pointer',
+              userSelect: 'none'
             }}
           >
-            <Box sx={{ width: 48, height: 5, bgcolor: '#d1d5db', borderRadius: 3 }} />
+            <Box sx={{ width: 56, height: 6, bgcolor: '#d1d5db', borderRadius: 3 }} />
           </Box>
           
-          {/* Scrollable Content */}
+          {/* Content */}
           <Box sx={{ flex: 1, overflow: 'auto', px: 3, pb: 3 }}>
-            {/* BUS LIST VIEW */}
+            {/* BUS LIST */}
             {viewMode === 'bus-list' && selectedStop && (
               <>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
                   <Box>
-                    <Typography variant="h6" fontWeight={700}>{selectedStop.common_name}</Typography>
+                    <Typography variant="h5" fontWeight={700}>{selectedStop.common_name}</Typography>
                     <Typography variant="body2" color="text.secondary">{selectedStop.locality}</Typography>
                   </Box>
-                  <IconButton size="small" onClick={handleBack}>
+                  <IconButton onClick={handleBack}>
                     <CloseIcon />
                   </IconButton>
                 </Box>
@@ -485,35 +457,37 @@ function App() {
                     <CircularProgress size={30} />
                   </Box>
                 ) : stopBuses.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <DirectionsBusIcon sx={{ fontSize: 48, color: '#d1d5db', mb: 1 }} />
+                  <Box sx={{ textAlign: 'center', py: 6 }}>
+                    <DirectionsBusIcon sx={{ fontSize: 64, color: '#d1d5db', mb: 2 }} />
                     <Typography color="text.secondary">No buses approaching</Typography>
                   </Box>
                 ) : (
                   <>
-                    <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block', fontWeight: 600 }}>
-                      TAP A BUS TO TRACK ({stopBuses.length})
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block', fontWeight: 600, textTransform: 'uppercase' }}>
+                      Select a bus to track ({stopBuses.length})
                     </Typography>
                     
                     {stopBuses.map((bus) => (
                       <Paper 
                         key={bus.bus_id} 
                         onClick={() => handleBusClick(bus)}
+                        elevation={2}
                         sx={{ 
                           mb: 2, 
-                          p: 2, 
+                          p: 2.5, 
                           display: 'flex', 
                           alignItems: 'center', 
                           gap: 2,
                           cursor: 'pointer',
-                          '&:hover': { bgcolor: '#f3f4f6' }
+                          borderRadius: 3,
+                          '&:hover': { bgcolor: '#f8fafc', transform: 'translateY(-2px)', transition: 'all 0.2s' }
                         }}
                       >
-                        <Avatar sx={{ bgcolor: getRouteColor(bus.route), width: 48, height: 48, fontWeight: 700 }}>
+                        <Avatar sx={{ bgcolor: getRouteColor(bus.route), width: 52, height: 52, fontWeight: 700, fontSize: '1.1rem' }}>
                           {bus.route}
                         </Avatar>
                         <Box sx={{ flex: 1 }}>
-                          <Typography fontWeight={700}>{bus.destination}</Typography>
+                          <Typography fontWeight={700} fontSize="1.1rem">{bus.destination}</Typography>
                           <Typography variant="caption" color="text.secondary">{bus.operator}</Typography>
                           <Chip
                             size="small"
@@ -527,11 +501,11 @@ function App() {
                           />
                         </Box>
                         <Box sx={{ textAlign: 'right' }}>
-                          <Typography variant="h5" fontWeight={800} color="#059669">
+                          <Typography variant="h4" fontWeight={800} color="#059669">
                             {formatTime(bus.distance_to_stop * 2)}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            <AccessTimeIcon sx={{ fontSize: 12, verticalAlign: 'middle' }} /> arriving
+                            arriving
                           </Typography>
                         </Box>
                       </Paper>
@@ -541,15 +515,15 @@ function App() {
               </>
             )}
             
-            {/* BUS DETAIL VIEW */}
+            {/* BUS DETAIL */}
             {viewMode === 'bus-detail' && selectedBus && selectedStop && (
               <>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
                   <IconButton onClick={handleBack} sx={{ mr: 1 }}>
                     <ArrowBackIcon />
                   </IconButton>
                   <Box sx={{ flex: 1 }}>
-                    <Typography variant="h6" fontWeight={700}>Bus {selectedBus.route}</Typography>
+                    <Typography variant="h5" fontWeight={700}>Bus {selectedBus.route}</Typography>
                     <Typography variant="body2" color="text.secondary">→ {selectedBus.destination}</Typography>
                   </Box>
                   <IconButton onClick={handleBack}>
@@ -560,8 +534,8 @@ function App() {
                 <Box sx={{ display: 'flex', gap: 1, mb: 3, flexWrap: 'wrap' }}>
                   <Chip 
                     icon={<LocationOnIcon sx={{ fontSize: 16 }} />}
-                    label={`${formatDist(selectedBus.distance_to_stop)} to stop`}
-                    sx={{ bgcolor: '#e0e7ff', color: '#4338ca' }}
+                    label={`${formatDist(selectedBus.distance_to_stop)} to ${selectedStop.common_name}`}
+                    sx={{ bgcolor: '#e0e7ff', color: '#4338ca', fontWeight: 600 }}
                   />
                   <Chip 
                     label={selectedBus.delay_minutes > 0 ? `${selectedBus.delay_minutes}m late` : 'On time'}
@@ -573,38 +547,46 @@ function App() {
                   />
                 </Box>
                 
-                <Paper sx={{ p: 3, bgcolor: '#f8fafc', textAlign: 'center', mb: 3 }}>
-                  <Typography variant="h1" fontWeight={800} color="#059669" sx={{ mb: 1, fontSize: '4rem' }}>
+                {/* ETA Card */}
+                <Paper sx={{ p: 4, bgcolor: '#f0fdf4', border: '2px solid #86efac', borderRadius: 4, textAlign: 'center', mb: 3 }}>
+                  <Typography variant="h1" fontWeight={800} color="#059669" sx={{ fontSize: '5rem', lineHeight: 1 }}>
                     {formatTime(selectedBus.distance_to_stop * 2)}
                   </Typography>
-                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                  <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
                     Estimated arrival at {selectedStop.common_name}
                   </Typography>
-                  
-                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 4 }}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h5" fontWeight={700}>{Math.round(selectedBus.speed || 0)}</Typography>
-                      <Typography variant="caption" color="text.secondary">km/h</Typography>
-                    </Box>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h5" fontWeight={700}>{formatDist(selectedBus.distance_to_user)}</Typography>
-                      <Typography variant="caption" color="text.secondary">from you</Typography>
-                    </Box>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h5" fontWeight={700}>{selectedBus.operator}</Typography>
-                      <Typography variant="caption" color="text.secondary">operator</Typography>
-                    </Box>
-                  </Box>
                 </Paper>
                 
-                <Paper sx={{ p: 2, bgcolor: '#eff6ff', border: '1px solid #3b82f6' }}>
-                  <Typography variant="subtitle2" color="#1e40af" fontWeight={700} sx={{ mb: 1 }}>
-                    📍 LIVE LOCATION ON MAP
+                {/* Stats */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 3 }}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h5" fontWeight={700}>{Math.round(selectedBus.speed || 0)}</Typography>
+                    <Typography variant="caption" color="text.secondary">km/h speed</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h5" fontWeight={700}>{formatDist(selectedBus.distance_to_user)}</Typography>
+                    <Typography variant="caption" color="text.secondary">from you</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h5" fontWeight={700}>{selectedBus.operator}</Typography>
+                    <Typography variant="caption" color="text.secondary">operator</Typography>
+                  </Box>
+                </Box>
+                
+                {/* Route Info */}
+                <Paper sx={{ p: 3, bgcolor: '#eff6ff', border: '2px solid #3b82f6', borderRadius: 3 }}>
+                  <Typography variant="subtitle1" fontWeight={700} color="#1e40af" sx={{ mb: 1 }}>
+                    📍 LIVE BUS LOCATION
                   </Typography>
                   <Typography variant="body2" color="#3b82f6">
-                    The blue line on the map shows Bus {selectedBus.route}'s travel path. 
-                    The bus marker updates every 10 seconds with real-time position from BODS.
+                    The <strong>thick blue line</strong> on the map shows where Bus {selectedBus.route} has traveled. 
+                    The bus icon updates every 10 seconds with real-time GPS position from BODS.
                   </Typography>
+                  {selectedBus.trail && selectedBus.trail.length > 0 && (
+                    <Typography variant="caption" color="#3b82f6" sx={{ mt: 1, display: 'block' }}>
+                      Trail has {selectedBus.trail.length} GPS points
+                    </Typography>
+                  )}
                 </Paper>
                 
                 {lastUpdate && (
@@ -615,14 +597,14 @@ function App() {
               </>
             )}
           </Box>
-        </Paper>
+        </Box>
       )}
       
       {/* Hint */}
-      {viewMode === 'stops' && (
+      {!sheetOpen && (
         <Paper sx={{ position: 'absolute', bottom: 16, left: 16, right: 16, p: 2, borderRadius: 2 }}>
           <Typography fontWeight={600}>📍 {allStops.length} bus stops</Typography>
-          <Typography variant="caption" color="text.secondary">Tap a stop → Select a bus → Track with live route</Typography>
+          <Typography variant="caption" color="text.secondary">Tap a stop → Select a bus → See live route</Typography>
         </Paper>
       )}
     </Box>
