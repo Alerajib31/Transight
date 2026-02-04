@@ -82,7 +82,7 @@ def send_to_backend(stop_id: str, crowd_count: int):
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Transight CV Counter - Bus Stop Monitoring')
-    parser.add_argument('--stop-id', required=True, help='Bus Stop ID (e.g., STOP_001)')
+    parser.add_argument('--stop-id', required=True, help='Bus Stop ID (BODS atco_code, e.g., 01000053220')
     parser.add_argument('--video', required=True, help='Video filename (e.g., 1.mp4)')
     args = parser.parse_args()
 

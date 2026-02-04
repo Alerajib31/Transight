@@ -111,8 +111,25 @@ Defines system settings and bus stop configurations:
 ```
 
 ### Database Schema (PostgreSQL)
+### API Endpoints (v2.0)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check and system status |
+| `/stops` | GET | List all bus stops (optionally filter by lat/lon/radius) |
+| `/stops/{stop_id}` | GET | Get specific stop with upcoming buses |
+| `/nearby-stops` | GET | Find stops near coordinates |
+| `/search` | GET | Search stops by name |
+| `/live-buses` | GET | Get live bus locations (optionally filter by location) |
+| `/live-buses/route/{route_id}` | GET | Get buses for specific route |
+| `/routes/nearby` | GET | Get active routes near user |
+| `/predict/{stop_id}` | GET | Get arrival prediction for stop |
+| `/analytics/{stop_id}` | GET | Historical analytics |
+| `/update-sensor-data` | POST | Receive CV crowd count data |
+
+### Database Schema (PostgreSQL)
 Table: `prediction_history`
-- `bus_stop_id` (TEXT): Stop identifier
+- `bus_stop_id` (TEXT): Stop identifier (BODS atco_code)
 - `crowd_count` (INTEGER): People detected
 - `traffic_delay` (FLOAT): Traffic delay in minutes
 - `dwell_delay` (FLOAT): Boarding time estimate
@@ -183,8 +200,9 @@ python run_all_cameras.py
 | `/health` | GET | Health check and system status |
 | `/stops` | GET | List all bus stops |
 | `/stops/{stop_id}` | GET | Get specific stop details |
-| `/routes` | GET | List all routes |
-| `/routes/{route_id}` | GET | Get route with stop predictions |
+| `/routes/nearby` | GET | Get routes near user location |
+| `/live-buses/route/{route_id}` | GET | Get buses for specific route |
+| `/search` | GET | Search stops by name |
 | `/predict/{stop_id}` | GET | Get arrival prediction for stop |
 | `/live-buses` | GET | Get live bus locations from BODS |
 | `/live-buses/{route_id}` | GET | Get buses for specific route |

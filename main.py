@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -10,12 +10,13 @@ import time
 import json
 import os
 from datetime import datetime, timedelta
+from math import radians, cos, sin, asin, sqrt
 
 # --- CONFIGURATION ---
 app = FastAPI(
     title="Transight Transit API",
-    description="Intelligent real-time transit prediction system",
-    version="1.0.0"
+    description="Real-time bus tracking and arrival prediction system",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -31,21 +32,10 @@ DB_PARAMS = {
 BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
 TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"
 
-# Cache for BODS data (refresh every 30 seconds)
-BODS_CACHE = {"data": None, "timestamp": 0}
+# Cache settings
+BODS_CACHE = {"data": None, "timestamp": 0, "stops": None, "stops_timestamp": 0}
 CACHE_EXPIRY = 30
-
-# Bus Stop Database (Replace with actual DB queries)
-BUS_STOPS = {
-    "STOP_001": {"name": "Temple Meads Station", "lat": 51.4496, "lon": -2.5811, "routes": [72, 10, 15]},
-    "STOP_002": {"name": "Cabot Circus", "lat": 51.4545, "lon": -2.5879, "routes": [72, 20]},
-    "STOP_003": {"name": "St Nicholas Market", "lat": 51.4510, "lon": -2.5880, "routes": [10, 72]},
-}
-
-ROUTES = {
-    "72": {"name": "Route 72: Temple Meads → Cabot Circus", "stops": ["STOP_001", "STOP_002", "STOP_003"]},
-    "10": {"name": "Route 10: Bristol Airport", "stops": ["STOP_001", "STOP_003"]},
-}
+STOPS_CACHE_EXPIRY = 300  # 5 minutes for stops
 
 # --- LOAD AI MODEL ---
 model_path = "bus_prediction_model.json"
@@ -83,11 +73,83 @@ class PredictionResponse(BaseModel):
     eta_time: str
     confidence: float
 
-# --- 1. DATA FUSION ENGINE (BODS + Traffic + CV) ---
-def fetch_bods_data():
+class BusStop(BaseModel):
+    stop_id: str
+    name: str
+    latitude: float
+    longitude: float
+    routes: List[str]
+
+# --- HELPER FUNCTIONS ---
+def haversine(lon1, lat1, lon2, lat2):
+    """Calculate distance between two points on earth (in km)"""
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371  # Radius of earth in kilometers
+    return c * r
+
+# --- 1. REAL BODS API INTEGRATION ---
+
+def fetch_bods_stops(lat: float = None, lon: float = None, radius: float = 1.0) -> List[dict]:
     """
-    Fetch live bus data from BODS API
-    Returns cached data if fresh, otherwise fetches new data
+    Fetch real bus stops from BODS API
+    """
+    global BODS_CACHE
+    
+    # Return cached stops if fresh
+    if BODS_CACHE["stops"] and (time.time() - BODS_CACHE["stops_timestamp"]) < STOPS_CACHE_EXPIRY:
+        stops = BODS_CACHE["stops"]
+    else:
+        try:
+            # BODS Stop API endpoint
+            url = "https://data.bus-data.dft.gov.uk/api/v1/stops/"
+            headers = {"X-API-Key": BODS_API_KEY}
+            params = {
+                "api_key": BODS_API_KEY,
+                "limit": 1000  # Get more stops
+            }
+            
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                stops = data.get("results", [])
+                BODS_CACHE["stops"] = stops
+                BODS_CACHE["stops_timestamp"] = time.time()
+                print(f"✅ Loaded {len(stops)} stops from BODS")
+            else:
+                print(f"⚠️ BODS Stops API Error: {response.status_code}")
+                stops = BODS_CACHE.get("stops", [])
+        except Exception as e:
+            print(f"⚠️ BODS Stops Error: {e}")
+            stops = BODS_CACHE.get("stops", [])
+    
+    # Filter by location if provided
+    if lat and lon and stops:
+        filtered_stops = []
+        for stop in stops:
+            try:
+                stop_lat = float(stop.get("latitude", 0))
+                stop_lon = float(stop.get("longitude", 0))
+                dist = haversine(lon, lat, stop_lon, stop_lat)
+                if dist <= radius:
+                    stop["distance_km"] = round(dist, 2)
+                    filtered_stops.append(stop)
+            except:
+                continue
+        # Sort by distance
+        filtered_stops.sort(key=lambda x: x.get("distance_km", 999))
+        return filtered_stops
+    
+    return stops
+
+
+def fetch_bods_live_buses(lat: float = None, lon: float = None, radius: float = 5.0) -> List[dict]:
+    """
+    Fetch live bus positions from BODS Vehicle Locations API
     """
     global BODS_CACHE
     
@@ -95,29 +157,77 @@ def fetch_bods_data():
     if BODS_CACHE["data"] and (time.time() - BODS_CACHE["timestamp"]) < CACHE_EXPIRY:
         return BODS_CACHE["data"]
     
+    buses = []
     try:
-        # BODS API endpoint for live vehicle positions
-        url = "https://api.bushesdata.org.uk/api/v1/datafeed"
+        # BODS Vehicle Locations API (SIRI-VM)
+        url = "https://data.bus-data.dft.gov.uk/api/v1/datafeed"
         headers = {"X-API-Key": BODS_API_KEY}
-        params = {"operatorRef": "all"}
+        params = {"api_key": BODS_API_KEY}
         
-        response = requests.get(url, headers=headers, params=params, timeout=5)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
-            BODS_CACHE["data"] = data
+            
+            # Parse SIRI-VM format
+            for entity in data.get("Siri", {}).get("ServiceDelivery", {}).get("VehicleMonitoringDelivery", {}).get("VehicleActivity", []):
+                try:
+                    journey = entity.get("MonitoredVehicleJourney", {})
+                    location = journey.get("VehicleLocation", {})
+                    
+                    bus_lat = float(location.get("Latitude", 0))
+                    bus_lon = float(location.get("Longitude", 0))
+                    
+                    # Filter by location if provided
+                    if lat and lon:
+                        dist = haversine(lon, lat, bus_lon, bus_lat)
+                        if dist > radius:
+                            continue
+                    
+                    # Parse delay
+                    delay = journey.get("Delay", "PT0S")
+                    delay_min = 0
+                    if "PT" in delay:
+                        delay_str = delay.replace("PT", "").replace("M", "").replace("S", "")
+                        if "M" in delay:
+                            parts = delay.replace("PT", "").split("M")
+                            delay_min = int(parts[0]) if parts[0].isdigit() else 0
+                    
+                    bus = {
+                        "bus_id": journey.get("VehicleRef", "Unknown"),
+                        "route": journey.get("PublishedLineName", journey.get("LineRef", "Unknown")),
+                        "route_id": journey.get("LineRef", "Unknown"),
+                        "operator": journey.get("OperatorRef", "Unknown"),
+                        "latitude": bus_lat,
+                        "longitude": bus_lon,
+                        "speed": journey.get("Speed", 0) or 0,
+                        "bearing": journey.get("Bearing", 0),
+                        "occupancy": journey.get("Occupancy", "Unknown"),
+                        "delay_minutes": delay_min,
+                        "destination": journey.get("DestinationName", "Unknown"),
+                        "origin": journey.get("OriginName", "Unknown"),
+                        "next_stop": journey.get("MonitoredCall", {}).get("StopPointName", "Unknown"),
+                        "next_stop_ref": journey.get("MonitoredCall", {}).get("StopPointRef", ""),
+                        "expected_arrival": journey.get("MonitoredCall", {}).get("ExpectedArrivalTime", ""),
+                    }
+                    buses.append(bus)
+                except Exception as e:
+                    continue
+            
+            BODS_CACHE["data"] = buses
             BODS_CACHE["timestamp"] = time.time()
-            return data
+            print(f"✅ Loaded {len(buses)} live buses from BODS")
+        else:
+            print(f"⚠️ BODS API Error: {response.status_code}")
     except Exception as e:
-        print(f"⚠️ BODS API Error: {e}")
+        print(f"⚠️ BODS Live Buses Error: {e}")
     
-    return BODS_CACHE.get("data", [])  # Return cached if API fails
+    return buses
 
 
 def get_traffic_data(lat: float, lon: float) -> dict:
     """
     Fetch real-time traffic data from TomTom API
-    Returns speed and traffic status
     """
     base_url = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
     params = {"key": TOMTOM_API_KEY, "point": f"{lat},{lon}"}
@@ -128,7 +238,6 @@ def get_traffic_data(lat: float, lon: float) -> dict:
             flow = resp.json().get('flowSegmentData', {})
             speed = flow.get('currentSpeed', 0)
             
-            # Classify traffic status
             if speed > 50:
                 status = "Free Flow"
             elif speed > 30:
@@ -144,29 +253,22 @@ def get_traffic_data(lat: float, lon: float) -> dict:
 
 
 def calculate_dwell_time(crowd_count: int) -> float:
-    """
-    Estimate passenger boarding time based on crowd
-    Formula: base_time + (per_person_time * crowd_count)
-    """
-    base_time = 0.5  # 30 seconds base boarding time
-    per_person_time = 0.05  # 3 seconds per person
+    """Estimate passenger boarding time based on crowd"""
+    base_time = 0.5
+    per_person_time = 0.05
     dwell_time = base_time + (per_person_time * crowd_count)
-    return dwell_time / 60  # Convert to minutes
+    return dwell_time / 60
 
 
 def get_confidence_score(crowd_count: int, traffic_status: str) -> float:
-    """
-    Calculate confidence in prediction based on data quality
-    """
-    confidence = 0.85  # Base confidence
+    """Calculate confidence in prediction based on data quality"""
+    confidence = 0.85
     
-    # Adjust based on crowd size
     if 0 < crowd_count < 50:
         confidence += 0.10
     elif crowd_count > 50:
         confidence -= 0.05
     
-    # Adjust based on traffic
     if traffic_status == "Free Flow":
         confidence += 0.05
     elif traffic_status == "Congested":
@@ -175,47 +277,52 @@ def get_confidence_score(crowd_count: int, traffic_status: str) -> float:
     return min(0.99, max(0.5, confidence))
 
 
-# --- 2. SENSOR UPDATE ENDPOINT (Called by CV Counter) ---
+# --- 2. API ENDPOINTS ---
+
 @app.post("/update-sensor-data")
 def update_sensor(data: SensorData):
     """
-    DATA FUSION ENGINE:
-    1. Receives Crowd Count (CV Vision)
-    2. Fetches Traffic Speed (TomTom)
-    3. Fetches Bus Location (BODS)
-    4. Predicts Delay (XGBoost)
-    5. Saves to DB
+    Receive crowd count from CV system and predict arrival
     """
     try:
-        # A. GET STOP LOCATION
-        stop_info = BUS_STOPS.get(data.stop_id, {})
-        lat, lon = stop_info.get("lat", 51.4496), stop_info.get("lon", -2.5811)
+        # Get real stop location from BODS
+        stops = fetch_bods_stops()
+        stop_info = None
+        for stop in stops:
+            if stop.get("atco_code") == data.stop_id or stop.get("id") == data.stop_id:
+                stop_info = stop
+                break
         
-        # B. GET REAL TRAFFIC
+        if not stop_info:
+            # Use default
+            lat, lon = 51.4496, -2.5811
+            stop_name = "Unknown Stop"
+        else:
+            lat = float(stop_info.get("latitude", 51.4496))
+            lon = float(stop_info.get("longitude", -2.5811))
+            stop_name = stop_info.get("common_name", "Unknown Stop")
+        
+        # Get real traffic data
         traffic_data = get_traffic_data(lat, lon)
         traffic_speed = traffic_data.get('speed', 30)
         traffic_status = traffic_data.get('status', 'Unknown')
         
-        # C. PREPARE AI INPUT
+        # Run AI prediction
         features = pd.DataFrame(
             [[data.crowd_count, traffic_speed, 10]],
             columns=['crowd_count', 'traffic_speed', 'scheduled_interval']
         )
         
-        # D. RUN PREDICTION
         predicted_delay = 0
         if bst:
             dmatrix = xgb.DMatrix(features)
             predicted_delay = float(bst.predict(dmatrix)[0])
         
-        # E. CALCULATE DWELL TIME
         dwell_delay = calculate_dwell_time(data.crowd_count)
         total_prediction = max(0, int(predicted_delay + dwell_delay))
-        
-        # F. CALCULATE CONFIDENCE
         confidence = get_confidence_score(data.crowd_count, traffic_status)
         
-        # G. SAVE TO DATABASE
+        # Save to database
         try:
             conn = psycopg2.connect(**DB_PARAMS)
             cur = conn.cursor()
@@ -227,14 +334,8 @@ def update_sensor(data: SensorData):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             """
             cur.execute(query, (
-                data.stop_id,
-                data.crowd_count,
-                predicted_delay,
-                dwell_delay,
-                total_prediction,
-                lat, lon,
-                traffic_status,
-                confidence
+                data.stop_id, data.crowd_count, predicted_delay,
+                dwell_delay, total_prediction, lat, lon, traffic_status, confidence
             ))
             
             conn.commit()
@@ -245,16 +346,16 @@ def update_sensor(data: SensorData):
         
         return {
             "status": "Fusion Complete",
+            "stop_name": stop_name,
             "new_prediction": total_prediction,
             "confidence": round(confidence, 2),
             "traffic_status": traffic_status
         }
-
+    
     except Exception as e:
         print(f"❌ Fusion Error: {e}")
         return {"error": str(e)}
 
-# --- 3. PREDICTION ENDPOINTS (For Frontend) ---
 
 @app.get("/predict/{stop_id}", response_model=Optional[PredictionResponse])
 def get_prediction(stop_id: str):
@@ -271,13 +372,21 @@ def get_prediction(stop_id: str):
         cur.close()
         conn.close()
 
+        # Get stop name from BODS
+        stops = fetch_bods_stops()
+        stop_name = "Unknown Stop"
+        for stop in stops:
+            if stop.get("atco_code") == stop_id or str(stop.get("id")) == stop_id:
+                stop_name = stop.get("common_name", "Unknown Stop")
+                break
+
         if row:
             eta_time = (datetime.now() + timedelta(minutes=int(row[2]))).strftime("%H:%M")
             crowd_level = "High" if row[3] > 10 else "Low"
             
             return PredictionResponse(
                 stop_id=stop_id,
-                stop_name=BUS_STOPS.get(stop_id, {}).get("name", "Unknown Stop"),
+                stop_name=stop_name,
                 crowd_count=row[3],
                 traffic_delay=round(row[0], 2),
                 dwell_delay=round(row[1], 2),
@@ -287,167 +396,222 @@ def get_prediction(stop_id: str):
                 eta_time=eta_time,
                 confidence=round(row[5], 2) if row[5] else 0.85
             )
-        return None
+        
+        # Return default if no data
+        return PredictionResponse(
+            stop_id=stop_id,
+            stop_name=stop_name,
+            crowd_count=0,
+            traffic_delay=0,
+            dwell_delay=0,
+            total_time_min=5,
+            crowd_level="Low",
+            traffic_status="Free Flow",
+            eta_time=(datetime.now() + timedelta(minutes=5)).strftime("%H:%M"),
+            confidence=0.75
+        )
     except Exception as e:
         print(f"Error fetching prediction: {e}")
         return None
 
 
 @app.get("/stops")
-def get_all_stops():
-    """Get all bus stops with their information"""
-    return {
-        "stops": [
-            {
-                "stop_id": stop_id,
-                "name": info["name"],
-                "latitude": info["lat"],
-                "longitude": info["lon"],
-                "routes": info["routes"]
-            }
-            for stop_id, info in BUS_STOPS.items()
-        ]
-    }
+def get_all_stops(
+    lat: float = Query(None, description="User latitude"),
+    lon: float = Query(None, description="User longitude"),
+    radius: float = Query(2.0, description="Search radius in km")
+):
+    """Get bus stops - optionally filtered by location"""
+    stops = fetch_bods_stops(lat, lon, radius)
+    
+    formatted_stops = []
+    for stop in stops:
+        formatted_stops.append({
+            "stop_id": stop.get("atco_code") or str(stop.get("id")),
+            "name": stop.get("common_name", "Unknown"),
+            "latitude": float(stop.get("latitude", 0)),
+            "longitude": float(stop.get("longitude", 0)),
+            "locality": stop.get("locality", ""),
+            "indicator": stop.get("indicator", ""),
+            "routes": [],  # Will be populated from live data
+            "distance_km": stop.get("distance_km")
+        })
+    
+    return {"stops": formatted_stops, "count": len(formatted_stops)}
 
 
 @app.get("/stops/{stop_id}")
 def get_stop_detail(stop_id: str):
     """Get detailed information about a specific stop"""
-    if stop_id not in BUS_STOPS:
+    # Find stop in BODS data
+    stops = fetch_bods_stops()
+    stop_info = None
+    for stop in stops:
+        if stop.get("atco_code") == stop_id or str(stop.get("id")) == stop_id:
+            stop_info = stop
+            break
+    
+    if not stop_info:
         raise HTTPException(status_code=404, detail="Stop not found")
     
-    stop_info = BUS_STOPS[stop_id]
+    # Get live buses for this stop
+    live_buses = fetch_bods_live_buses()
+    upcoming_buses = []
+    
+    for bus in live_buses:
+        if bus.get("next_stop_ref") == stop_id:
+            upcoming_buses.append(bus)
+    
+    # Sort by expected arrival
+    upcoming_buses.sort(key=lambda x: x.get("expected_arrival", ""))
+    
     return {
         "stop_id": stop_id,
-        "name": stop_info["name"],
-        "latitude": stop_info["lat"],
-        "longitude": stop_info["lon"],
-        "routes": stop_info["routes"],
+        "name": stop_info.get("common_name", "Unknown"),
+        "latitude": float(stop_info.get("latitude", 0)),
+        "longitude": float(stop_info.get("longitude", 0)),
+        "locality": stop_info.get("locality", ""),
+        "indicator": stop_info.get("indicator", ""),
+        "upcoming_buses": upcoming_buses[:5],  # Next 5 buses
         "prediction": get_prediction(stop_id)
     }
 
 
-@app.get("/routes")
-def get_all_routes():
-    """Get all transit routes"""
-    return {
-        "routes": [
-            {
-                "route_id": route_id,
-                "name": info["name"],
-                "stops": info["stops"]
-            }
-            for route_id, info in ROUTES.items()
-        ]
-    }
-
-
-@app.get("/routes/{route_id}")
-def get_route_detail(route_id: str):
-    """Get detailed information about a specific route"""
-    if route_id not in ROUTES:
-        raise HTTPException(status_code=404, detail="Route not found")
-    
-    route_info = ROUTES[route_id]
-    stops_data = []
-    
-    for stop_id in route_info["stops"]:
-        stop_info = BUS_STOPS.get(stop_id, {})
-        prediction = get_prediction(stop_id)
-        stops_data.append({
-            "stop_id": stop_id,
-            "name": stop_info.get("name"),
-            "latitude": stop_info.get("lat"),
-            "longitude": stop_info.get("lon"),
-            "prediction": prediction
-        })
-    
-    return {
-        "route_id": route_id,
-        "name": route_info["name"],
-        "stops": stops_data
-    }
-
-
 @app.get("/live-buses")
-def get_live_buses():
+def get_live_buses(
+    lat: float = Query(None, description="User latitude"),
+    lon: float = Query(None, description="User longitude"),
+    radius: float = Query(5.0, description="Search radius in km")
+):
     """Get live bus locations and status"""
-    try:
-        bods_data = fetch_bods_data()
-        buses = []
-        
-        if bods_data and isinstance(bods_data, list):
-            for vehicle in bods_data[:10]:  # Limit to 10 buses for demo
-                try:
-                    buses.append({
-                        "bus_id": vehicle.get("vehicle", {}).get("id", "Unknown"),
-                        "route": vehicle.get("monitoredVehicleJourney", {}).get("lineRef", "Unknown"),
-                        "latitude": vehicle.get("monitoredVehicleJourney", {}).get("vehicleLocation", {}).get("latitude", 0),
-                        "longitude": vehicle.get("monitoredVehicleJourney", {}).get("vehicleLocation", {}).get("longitude", 0),
-                        "occupancy": vehicle.get("monitoredVehicleJourney", {}).get("occupancy", "Unknown"),
-                        "delay": vehicle.get("monitoredVehicleJourney", {}).get("delay", "PT0S"),
-                        "speed": vehicle.get("monitoredVehicleJourney", {}).get("speed", 0)
-                    })
-                except Exception as e:
-                    print(f"Error parsing BODS vehicle: {e}")
-        
-        return {
-            "buses": buses,
-            "timestamp": datetime.now().isoformat(),
-            "data_source": "BODS API"
-        }
-    except Exception as e:
-        print(f"Error fetching live buses: {e}")
-        return {"buses": [], "timestamp": datetime.now().isoformat(), "error": str(e)}
+    buses = fetch_bods_live_buses(lat, lon, radius)
+    
+    return {
+        "buses": buses,
+        "count": len(buses),
+        "timestamp": datetime.now().isoformat(),
+        "data_source": "BODS API"
+    }
 
 
-@app.get("/live-buses/{route_id}")
+@app.get("/live-buses/route/{route_id}")
 def get_live_buses_by_route(route_id: str):
     """Get live buses for a specific route"""
-    all_buses = get_live_buses()
-    filtered_buses = [bus for bus in all_buses.get("buses", []) if route_id in str(bus.get("route", ""))]
+    all_buses = fetch_bods_live_buses()
+    filtered_buses = [bus for bus in all_buses if route_id.upper() in str(bus.get("route", "")).upper()]
     
     return {
         "route_id": route_id,
         "buses": filtered_buses,
+        "count": len(filtered_buses),
         "timestamp": datetime.now().isoformat()
     }
 
 
 @app.get("/nearby-stops")
-def get_nearby_stops(latitude: float, longitude: float, radius: float = 1.0):
-    """
-    Get bus stops within a specified radius (km) of user location
-    """
-    from math import radians, cos, sin, asin, sqrt
-    
-    def haversine(lon1, lat1, lon2, lat2):
-        """Calculate distance between two points on earth (in km)"""
-        lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-        dlon = lon2 - lon1
-        dlat = lat2 - lat1
-        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-        c = 2 * asin(sqrt(a))
-        r = 6371  # Radius of earth in kilometers
-        return c * r
+def get_nearby_stops(
+    latitude: float = Query(..., description="User latitude"),
+    longitude: float = Query(..., description="User longitude"),
+    radius: float = Query(1.0, description="Search radius in km")
+):
+    """Get bus stops within a specified radius of user location"""
+    stops = fetch_bods_stops(latitude, longitude, radius)
     
     nearby = []
-    for stop_id, stop_info in BUS_STOPS.items():
-        dist = haversine(longitude, latitude, stop_info["lon"], stop_info["lat"])
-        if dist <= radius:
-            prediction = get_prediction(stop_id)
-            nearby.append({
-                "stop_id": stop_id,
-                "name": stop_info["name"],
-                "distance_km": round(dist, 2),
-                "latitude": stop_info["lat"],
-                "longitude": stop_info["lon"],
-                "routes": stop_info["routes"],
-                "prediction": prediction
-            })
+    for stop in stops:
+        stop_id = stop.get("atco_code") or str(stop.get("id"))
+        nearby.append({
+            "stop_id": stop_id,
+            "name": stop.get("common_name", "Unknown"),
+            "distance_km": stop.get("distance_km", 0),
+            "latitude": float(stop.get("latitude", 0)),
+            "longitude": float(stop.get("longitude", 0)),
+            "locality": stop.get("locality", ""),
+            "indicator": stop.get("indicator", ""),
+            "routes": []
+        })
     
-    nearby.sort(key=lambda x: x["distance_km"])
-    return {"nearby_stops": nearby, "user_location": {"latitude": latitude, "longitude": longitude}}
+    return {
+        "nearby_stops": nearby,
+        "count": len(nearby),
+        "user_location": {"latitude": latitude, "longitude": longitude},
+        "radius_km": radius
+    }
+
+
+@app.get("/routes/nearby")
+def get_routes_nearby(
+    lat: float = Query(..., description="User latitude"),
+    lon: float = Query(..., description="User longitude"),
+    radius: float = Query(2.0, description="Search radius in km")
+):
+    """Get all routes operating near user location"""
+    # Get nearby stops
+    stops_data = fetch_bods_stops(lat, lon, radius)
+    
+    # Get live buses to determine active routes
+    live_buses = fetch_bods_live_buses(lat, lon, radius)
+    
+    # Build route info
+    routes = {}
+    for bus in live_buses:
+        route = bus.get("route", "Unknown")
+        if route not in routes:
+            routes[route] = {
+                "route_id": route,
+                "name": f"Route {route}",
+                "destination": bus.get("destination", "Unknown"),
+                "operator": bus.get("operator", "Unknown"),
+                "active_buses": 0,
+                "buses": []
+            }
+        routes[route]["active_buses"] += 1
+        routes[route]["buses"].append(bus)
+    
+    return {
+        "routes": list(routes.values()),
+        "count": len(routes),
+        "nearby_stops": len(stops_data),
+        "user_location": {"latitude": lat, "longitude": lon}
+    }
+
+
+@app.get("/search")
+def search_stops(
+    q: str = Query(..., description="Search query"),
+    lat: float = Query(None, description="User latitude for distance sorting"),
+    lon: float = Query(None, description="User longitude for distance sorting")
+):
+    """Search for bus stops by name"""
+    all_stops = fetch_bods_stops()
+    query = q.lower()
+    
+    results = []
+    for stop in all_stops:
+        name = stop.get("common_name", "").lower()
+        locality = stop.get("locality", "").lower()
+        
+        if query in name or query in locality:
+            stop_data = {
+                "stop_id": stop.get("atco_code") or str(stop.get("id")),
+                "name": stop.get("common_name", "Unknown"),
+                "locality": stop.get("locality", ""),
+                "latitude": float(stop.get("latitude", 0)),
+                "longitude": float(stop.get("longitude", 0)),
+            }
+            
+            # Add distance if user location provided
+            if lat and lon:
+                dist = haversine(lon, lat, float(stop.get("longitude", 0)), float(stop.get("latitude", 0)))
+                stop_data["distance_km"] = round(dist, 2)
+            
+            results.append(stop_data)
+    
+    # Sort by distance if available
+    if lat and lon:
+        results.sort(key=lambda x: x.get("distance_km", 999))
+    
+    return {"results": results[:20], "query": q, "count": len(results)}
 
 
 @app.get("/analytics/{stop_id}")
@@ -497,6 +661,18 @@ def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "model_loaded": bst is not None,
-        "stops_configured": len(BUS_STOPS),
-        "routes_configured": len(ROUTES)
+        "version": "2.0.0"
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("🚌 Transight API Server Starting...")
+    print("📍 Endpoints:")
+    print("   - GET  /stops?lat=51.45&lon=-2.58&radius=2")
+    print("   - GET  /nearby-stops?latitude=51.45&longitude=-2.58")
+    print("   - GET  /live-buses?lat=51.45&lon=-2.58")
+    print("   - GET  /search?q=bristol")
+    print("   - GET  /predict/{stop_id}")
+    print("   - GET  /health")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
