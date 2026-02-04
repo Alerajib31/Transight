@@ -396,11 +396,26 @@ def get_my_buses(
 def get_nearby_stops(
     latitude: float = Query(...),
     longitude: float = Query(...),
-    radius: float = Query(1.0)
+    radius: float = Query(5.0)
 ):
-    """Get stops near location"""
+    """Get stops near location - returns nearest stops if none in radius"""
     stops = get_stops_near_location(latitude, longitude, radius)
-    return {"stops": stops, "count": len(stops)}
+    
+    # If no stops found, return 10 nearest regardless of distance
+    if not stops:
+        all_stops = fetch_all_stops()
+        for stop in all_stops:
+            try:
+                dist = haversine(longitude, latitude, stop["longitude"], stop["latitude"])
+                stop_copy = dict(stop)
+                stop_copy["distance_km"] = round(dist, 2)
+                stops.append(stop_copy)
+            except:
+                continue
+        stops.sort(key=lambda x: x["distance_km"])
+        stops = stops[:10]
+    
+    return {"stops": stops, "count": len(stops), "user_location": {"lat": latitude, "lon": longitude}}
 
 @app.get("/search-stops")
 def search_stops(
@@ -460,6 +475,54 @@ def get_bus(bus_id: str):
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
     return bus
+
+@app.get("/stop/{stop_id}/buses")
+def get_buses_for_stop(
+    stop_id: str,
+    lat: float = Query(...),
+    lon: float = Query(...)
+):
+    """Get buses approaching a specific stop"""
+    # Find the stop
+    all_stops = fetch_all_stops()
+    stop = None
+    for s in all_stops:
+        if s.get("atco_code") == stop_id:
+            stop = s
+            break
+    
+    if not stop:
+        raise HTTPException(status_code=404, detail="Stop not found")
+    
+    # Fetch buses in area
+    lat_offset = 0.2
+    lon_offset = 0.25
+    all_buses = fetch_live_buses(lon - lon_offset, lat - lat_offset, lon + lon_offset, lat + lat_offset)
+    
+    # Filter buses for this stop
+    stop_buses = []
+    for bus in all_buses.values():
+        next_stop_ref = bus.get("next_stop_ref", "")
+        is_heading_to_stop = next_stop_ref == stop_id
+        
+        # Check distance to this stop
+        dist_to_stop = haversine(stop["longitude"], stop["latitude"], bus["longitude"], bus["latitude"])
+        is_near_stop = dist_to_stop < 1.5  # Within 1.5km
+        
+        if is_heading_to_stop or is_near_stop:
+            bus_copy = dict(bus)
+            bus_copy["distance_to_stop"] = round(dist_to_stop, 2)
+            bus_copy["distance_to_user"] = round(haversine(lon, lat, bus["longitude"], bus["latitude"]), 2)
+            stop_buses.append(bus_copy)
+    
+    # Sort by distance to user
+    stop_buses.sort(key=lambda x: x["distance_to_user"])
+    
+    return {
+        "stop": stop,
+        "buses": stop_buses,
+        "count": len(stop_buses)
+    }
 
 @app.get("/health")
 def health_check():
