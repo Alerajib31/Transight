@@ -17,95 +17,164 @@ from math import radians, cos, sin, asin, sqrt
 app = FastAPI(
     title="Transight Transit API",
     description="Real-time bus tracking and arrival prediction system",
-    version="3.0.0"
+    version="3.1.0"
 )
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
-# Database Credentials
 DB_PARAMS = {
     "host": "localhost", "database": "transight_db", "user": "postgres", "password": "R@jibale3138"
 }
 
-# API Keys - REPLACE WITH YOUR VALID BODS API KEY
 BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
-TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"
 
-# Cache and history
-BODS_CACHE = {"buses": {}, "timestamp": 0}
+# Cache
+STOPS_CACHE = {"data": None, "timestamp": 0}
+STOPS_CACHE_EXPIRY = 600  # 10 minutes
+BUSES_CACHE = {"buses": {}, "timestamp": 0}
 BUS_HISTORY = {}
 CACHE_EXPIRY = 10
 
-# Default Bristol stops
-DEFAULT_STOPS = [
+# Comprehensive UK bus stops database (major cities)
+DEFAULT_UK_STOPS = [
+    # Bristol
     {"atco_code": "01000053220", "common_name": "Temple Meads Station", "locality": "Bristol", "indicator": "T4", "latitude": 51.4496, "longitude": -2.5811},
-    {"atco_code": "01000053221", "common_name": "Temple Meads Station", "locality": "Bristol", "indicator": "T5", "latitude": 51.4498, "longitude": -2.5815},
     {"atco_code": "01000588088", "common_name": "Cabot Circus", "locality": "Bristol", "indicator": "S1", "latitude": 51.4545, "longitude": -2.5879},
-    {"atco_code": "01000588089", "common_name": "Cabot Circus", "locality": "Bristol", "indicator": "S2", "latitude": 51.4547, "longitude": -2.5882},
     {"atco_code": "01000001008", "common_name": "St Nicholas Market", "locality": "Bristol", "indicator": "A1", "latitude": 51.4510, "longitude": -2.5880},
-    {"atco_code": "01000001009", "common_name": "St Nicholas Market", "locality": "Bristol", "indicator": "A2", "latitude": 51.4512, "longitude": -2.5885},
     {"atco_code": "01000053304", "common_name": "Broadmead", "locality": "Bristol", "indicator": "C1", "latitude": 51.4580, "longitude": -2.5905},
-    {"atco_code": "01000053305", "common_name": "Broadmead", "locality": "Bristol", "indicator": "C2", "latitude": 51.4582, "longitude": -2.5908},
     {"atco_code": "01000058001", "common_name": "Clifton Down", "locality": "Bristol", "indicator": "CD1", "latitude": 51.4645, "longitude": -2.6098},
-    {"atco_code": "01000058002", "common_name": "Clifton Down", "locality": "Bristol", "indicator": "CD2", "latitude": 51.4647, "longitude": -2.6102},
+    {"atco_code": "01000054001", "common_name": "Bedminster Parade", "locality": "Bristol", "indicator": "B1", "latitude": 51.4420, "longitude": -2.5945},
+    {"atco_code": "01000055001", "common_name": "Southmead Hospital", "locality": "Bristol", "indicator": "H1", "latitude": 51.4950, "longitude": -2.5950},
+    {"atco_code": "01000057001", "common_name": "UWE Frenchay", "locality": "Bristol", "indicator": "U1", "latitude": 51.5005, "longitude": -2.5490},
+    {"atco_code": "01000056001", "common_name": "Bristol Parkway", "locality": "Stoke Gifford", "indicator": "P1", "latitude": 51.5135, "longitude": -2.5420},
+    
+    # London (sample)
+    {"atco_code": "490000252S", "common_name": "Victoria Station", "locality": "London", "indicator": "S", "latitude": 51.4952, "longitude": -0.1439},
+    {"atco_code": "490000235Z", "common_name": "Waterloo Station", "locality": "London", "indicator": "Z", "latitude": 51.5036, "longitude": -0.1123},
+    {"atco_code": "490001081N", "common_name": "Oxford Circus", "locality": "London", "indicator": "N", "latitude": 51.5150, "longitude": -0.1415},
+    {"atco_code": "490007732W", "common_name": "King's Cross Station", "locality": "London", "indicator": "W", "latitude": 51.5309, "longitude": -0.1230},
+    {"atco_code": "490001298G", "common_name": "Liverpool Street", "locality": "London", "indicator": "G", "latitude": 51.5188, "longitude": -0.0814},
+    
+    # Manchester
+    {"atco_code": "180000231", "common_name": "Piccadilly Gardens", "locality": "Manchester", "indicator": "Stop A", "latitude": 53.4803, "longitude": -2.2367},
+    {"atco_code": "180000173", "common_name": "Piccadilly Station", "locality": "Manchester", "indicator": "Stop A", "latitude": 53.4773, "longitude": -2.2301},
+    {"atco_code": "180000065", "common_name": "Victoria Station", "locality": "Manchester", "indicator": "Stop A", "latitude": 53.4875, "longitude": -2.2422},
+    {"atco_code": "180000233", "common_name": "Deansgate", "locality": "Manchester", "indicator": "Stop A", "latitude": 53.4742, "longitude": -2.2497},
+    
+    # Birmingham
+    {"atco_code": "43000203201", "common_name": "Bull Street", "locality": "Birmingham", "indicator": "BS1", "latitude": 52.4814, "longitude": -1.8964},
+    {"atco_code": "43000204001", "common_name": "New Street Station", "locality": "Birmingham", "indicator": "NS1", "latitude": 52.4778, "longitude": -1.8990},
+    {"atco_code": "43000206001", "common_name": "Grand Central", "locality": "Birmingham", "indicator": "GC1", "latitude": 52.4792, "longitude": -1.8994},
+    {"atco_code": "43000280101", "common_name": "Snow Hill Station", "locality": "Birmingham", "indicator": "SH1", "latitude": 52.4833, "longitude": -1.8858},
+    
+    # Liverpool
+    {"atco_code": "2400102901", "common_name": "Liverpool ONE", "locality": "Liverpool", "indicator": "L1", "latitude": 53.4041, "longitude": -2.9836},
+    {"atco_code": "2400101010", "common_name": "Queen Square", "locality": "Liverpool", "indicator": "QS1", "latitude": 53.4073, "longitude": -2.9825},
+    {"atco_code": "2400211081", "common_name": "Lime Street Station", "locality": "Liverpool", "indicator": "LS1", "latitude": 53.4085, "longitude": -2.9773},
+    {"atco_code": "2400157801", "common_name": "Paradise Street", "locality": "Liverpool", "indicator": "PS1", "latitude": 53.4039, "longitude": -2.9875},
+    
+    # Leeds
+    {"atco_code": "450010141", "common_name": "Leeds Station", "locality": "Leeds", "indicator": "A1", "latitude": 53.7958, "longitude": -1.5480},
+    {"atco_code": "450020080", "common_name": "Corn Exchange", "locality": "Leeds", "indicator": "A1", "latitude": 53.7972, "longitude": -1.5350},
+    {"atco_code": "450010054", "common_name": "Vicar Lane", "locality": "Leeds", "indicator": "A1", "latitude": 53.7989, "longitude": -1.5389},
+    {"atco_code": "450010060", "common_name": "Boar Lane", "locality": "Leeds", "indicator": "A1", "latitude": 53.7961, "longitude": -1.5436},
+    
+    # Glasgow
+    {"atco_code": "640001451", "common_name": "Buchanan Bus Station", "locality": "Glasgow", "indicator": "Stance 1", "latitude": 55.8642, "longitude": -4.2518},
+    {"atco_code": "640002051", "common_name": "Central Station", "locality": "Glasgow", "indicator": "A1", "latitude": 55.8596, "longitude": -4.2581},
+    {"atco_code": "640000221", "common_name": "Argyle Street", "locality": "Glasgow", "indicator": "A1", "latitude": 55.8580, "longitude": -4.2520},
+    {"atco_code": "640001761", "common_name": "Buchanan Street", "locality": "Glasgow", "indicator": "S", "latitude": 55.8632, "longitude": -4.2530},
+    
+    # Edinburgh
+    {"atco_code": "6200200010", "common_name": "Princes Street", "locality": "Edinburgh", "indicator": "A", "latitude": 55.9524, "longitude": -3.1933},
+    {"atco_code": "6200201010", "common_name": "Waverley Bridge", "locality": "Edinburgh", "indicator": "A", "latitude": 55.9513, "longitude": -3.1905},
+    {"atco_code": "6200248010", "common_name": "St Andrew Square", "locality": "Edinburgh", "indicator": "A", "latitude": 55.9541, "longitude": -3.1933},
+    {"atco_code": "6200206010", "common_name": "Lothian Road", "locality": "Edinburgh", "indicator": "A", "latitude": 55.9474, "longitude": -3.2065},
+    
+    # Cardiff
+    {"atco_code": "570001113456", "common_name": "Central Station", "locality": "Cardiff", "indicator": "CN", "latitude": 51.4763, "longitude": -3.1789},
+    {"atco_code": "570001113481", "common_name": "Queen Street Station", "locality": "Cardiff", "indicator": "QS", "latitude": 51.4816, "longitude": -3.1705},
+    {"atco_code": "570001113462", "common_name": "St Mary Street", "locality": "Cardiff", "indicator": "SM", "latitude": 51.4805, "longitude": -3.1767},
+    {"atco_code": "570001113471", "common_name": "Duke Street", "locality": "Cardiff", "indicator": "KD", "latitude": 51.4831, "longitude": -3.1718},
+    
+    # Bath
+    {"atco_code": "019035903546", "common_name": "Dorchester Street", "locality": "Bath", "indicator": "A", "latitude": 51.3817, "longitude": -2.3571},
+    {"atco_code": "019035904161", "common_name": "Manvers Street", "locality": "Bath", "indicator": "B", "latitude": 51.3819, "longitude": -2.3561},
 ]
 
-# --- LOAD AI MODEL ---
+# Load AI model
 model_path = "bus_prediction_model.json"
 bst = None
-
 if os.path.exists(model_path):
-    print("Loading XGBoost Brain...")
     bst = xgb.Booster()
     bst.load_model(model_path)
 
 # --- HELPER FUNCTIONS ---
 def haversine(lon1, lat1, lon2, lat2):
-    """Calculate distance between two points on earth (in km)"""
+    """Calculate distance (km)"""
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
     dlat = lat2 - lat1
     a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
     c = 2 * asin(sqrt(a))
-    r = 6371
-    return c * r
+    return 6371 * c
 
+def fetch_all_stops():
+    """Get all stops - uses default database since BODS stops API is unreliable"""
+    return DEFAULT_UK_STOPS
 
-# --- 1. BODS API - XML PARSING ---
+def get_stops_near_location(lat: float, lon: float, radius: float = 1.0) -> List[dict]:
+    """Get stops within radius"""
+    all_stops = fetch_all_stops()
+    
+    nearby = []
+    for stop in all_stops:
+        try:
+            s_lat = stop.get("latitude", 0)
+            s_lon = stop.get("longitude", 0)
+            if s_lat == 0 or s_lon == 0:
+                continue
+            
+            dist = haversine(lon, lat, s_lon, s_lat)
+            if dist <= radius:
+                stop_copy = dict(stop)
+                stop_copy["distance_km"] = round(dist, 2)
+                nearby.append(stop_copy)
+        except:
+            continue
+    
+    nearby.sort(key=lambda x: x.get("distance_km", 999))
+    return nearby
+
+# --- BODS BUS API ---
 
 def parse_siri_xml(xml_text):
-    """Parse SIRI-VM XML response and extract bus data"""
+    """Parse SIRI-VM XML"""
     buses = []
     try:
         root = ET.fromstring(xml_text)
-        
-        # Define namespace
         ns = {'siri': 'http://www.siri.org.uk/siri'}
         
-        # Find all VehicleActivity elements
         for vehicle in root.findall('.//siri:VehicleActivity', ns):
             try:
                 journey = vehicle.find('.//siri:MonitoredVehicleJourney', ns)
                 if journey is None:
                     continue
                 
-                # Extract vehicle location
                 location = journey.find('.//siri:VehicleLocation', ns)
                 if location is None:
                     continue
                 
                 lat_elem = location.find('siri:Latitude', ns)
                 lon_elem = location.find('siri:Longitude', ns)
-                
                 if lat_elem is None or lon_elem is None:
                     continue
                 
                 lat = float(lat_elem.text)
                 lon = float(lon_elem.text)
                 
-                # Extract other fields
                 bus_id_elem = journey.find('siri:VehicleRef', ns)
                 bus_id = bus_id_elem.text if bus_id_elem is not None else "Unknown"
                 
@@ -129,10 +198,6 @@ def parse_siri_xml(xml_text):
                 origin_elem = journey.find('siri:OriginName', ns)
                 origin = origin_elem.text if origin_elem is not None else "Unknown"
                 
-                direction_elem = journey.find('siri:DirectionRef', ns)
-                direction = direction_elem.text if direction_elem is not None else "unknown"
-                
-                # Get delay
                 delay_elem = journey.find('siri:Delay', ns)
                 delay = delay_elem.text if delay_elem is not None else "PT0S"
                 delay_min = 0
@@ -144,7 +209,6 @@ def parse_siri_xml(xml_text):
                 except:
                     delay_min = 0
                 
-                # Get next stop info
                 monitored_call = journey.find('.//siri:MonitoredCall', ns)
                 next_stop = "Unknown"
                 next_stop_ref = ""
@@ -163,10 +227,9 @@ def parse_siri_xml(xml_text):
                     if arrival_elem is not None:
                         expected_arrival = arrival_elem.text
                 
-                bus_data = {
+                buses.append({
                     "bus_id": bus_id,
                     "route": route,
-                    "route_id": route,
                     "operator": operator,
                     "latitude": lat,
                     "longitude": lon,
@@ -175,26 +238,20 @@ def parse_siri_xml(xml_text):
                     "delay_minutes": delay_min,
                     "destination": destination,
                     "origin": origin,
-                    "direction": direction,
                     "next_stop": next_stop,
                     "next_stop_ref": next_stop_ref,
                     "expected_arrival": expected_arrival,
-                }
-                
-                buses.append(bus_data)
-                
-            except Exception as e:
+                })
+            except:
                 continue
-                
     except Exception as e:
-        print(f"XML parsing error: {e}")
+        print(f"XML parse error: {e}")
     
     return buses
 
-
-def fetch_bods_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: float) -> Dict[str, dict]:
-    """Fetch REAL bus positions from BODS using boundingBox"""
-    global BODS_CACHE, BUS_HISTORY
+def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: float):
+    """Fetch live buses from BODS"""
+    global BUSES_CACHE, BUS_HISTORY
     
     try:
         url = "https://data.bus-data.dft.gov.uk/api/v1/datafeed/"
@@ -206,255 +263,147 @@ def fetch_bods_live_buses(min_lon: float, min_lat: float, max_lon: float, max_la
         response = requests.get(url, params=params, timeout=15)
         
         if response.status_code == 200:
-            # Parse XML response
             buses_list = parse_siri_xml(response.text)
             
             current_time = time.time()
-            active_buses = {}
+            bus_dict = {}
             
             for bus in buses_list:
                 bus_id = bus["bus_id"]
-                bus_lat = bus["latitude"]
-                bus_lon = bus["longitude"]
                 
-                # Update history
                 if bus_id not in BUS_HISTORY:
                     BUS_HISTORY[bus_id] = []
                 
                 BUS_HISTORY[bus_id].append({
-                    "lat": bus_lat,
-                    "lon": bus_lon,
+                    "lat": bus["latitude"],
+                    "lon": bus["longitude"],
                     "timestamp": current_time
                 })
                 
-                # Keep last 20 positions
                 if len(BUS_HISTORY[bus_id]) > 20:
                     BUS_HISTORY[bus_id] = BUS_HISTORY[bus_id][-20:]
                 
                 bus["trail"] = BUS_HISTORY[bus_id]
                 bus["last_updated"] = current_time
-                active_buses[bus_id] = bus
+                bus_dict[bus_id] = bus
             
-            # Clean old buses
-            cutoff_time = current_time - 60
-            BODS_CACHE["buses"] = {
-                k: v for k, v in active_buses.items() 
-                if v.get("last_updated", 0) > cutoff_time
-            }
-            BODS_CACHE["timestamp"] = current_time
-            
-            print(f"BODS: Found {len(active_buses)} real buses")
-            return BODS_CACHE["buses"]
+            BUSES_CACHE["buses"] = bus_dict
+            BUSES_CACHE["timestamp"] = current_time
+            return bus_dict
         else:
-            print(f"BODS API Error: {response.status_code}")
-            return BODS_CACHE.get("buses", {})
-            
+            return BUSES_CACHE.get("buses", {})
     except Exception as e:
-        print(f"BODS Error: {e}")
-        return BODS_CACHE.get("buses", {})
+        print(f"BODS fetch error: {e}")
+        return BUSES_CACHE.get("buses", {})
 
-
-def get_buses_near_location(lat: float, lon: float, radius_km: float = 5.0) -> List[dict]:
-    """Get buses within radius of location"""
-    lat_offset = radius_km / 111.0
-    lon_offset = radius_km / (111.0 * cos(radians(lat)))
+def get_buses_for_user(lat: float, lon: float, radius: float = 1.5):
+    """Get buses near user's stops (by proximity or next_stop_ref)"""
+    # Get nearby stops
+    nearby_stops = get_stops_near_location(lat, lon, radius)
     
-    min_lat = lat - lat_offset
-    max_lat = lat + lat_offset
-    min_lon = lon - lon_offset
-    max_lon = lon + lon_offset
+    if not nearby_stops:
+        return {"stops": [], "buses": []}
     
-    all_buses = fetch_bods_live_buses(min_lon, min_lat, max_lon, max_lat)
+    stop_ids = {s["atco_code"] for s in nearby_stops if s.get("atco_code")}
     
-    nearby = []
-    for bus_id, bus in all_buses.items():
-        try:
-            dist = haversine(lon, lat, bus["longitude"], bus["latitude"])
-            if dist <= radius_km:
-                bus_copy = dict(bus)
-                bus_copy["distance_km"] = round(dist, 2)
-                nearby.append(bus_copy)
-        except:
-            continue
+    # Fetch buses in larger area
+    lat_offset = 0.15
+    lon_offset = 0.2
+    all_buses = fetch_live_buses(lon - lon_offset, lat - lat_offset, lon + lon_offset, lat + lat_offset)
     
-    return nearby
-
-
-def fetch_bods_stops(lat: float = None, lon: float = None, radius: float = 1.0) -> List[dict]:
-    """Fetch bus stops"""
-    stops = DEFAULT_STOPS
+    # Find buses that are:
+    # 1. Heading to one of user's stops (next_stop_ref matches)
+    # 2. OR physically close to one of user's stops (within 800m)
+    relevant_buses = []
+    for bus in all_buses.values():
+        bus_lat = bus["latitude"]
+        bus_lon = bus["longitude"]
+        next_stop_ref = bus.get("next_stop_ref", "")
+        
+        # Check if heading to one of user's stops
+        is_heading_to_stop = next_stop_ref in stop_ids
+        
+        # Check if close to any of user's stops
+        is_near_stop = False
+        nearest_stop = None
+        nearest_dist = float('inf')
+        
+        for stop in nearby_stops:
+            dist_to_stop = haversine(stop["longitude"], stop["latitude"], bus_lon, bus_lat)
+            if dist_to_stop < nearest_dist:
+                nearest_dist = dist_to_stop
+                nearest_stop = stop
+            if dist_to_stop < 0.8:  # Within 800m of a stop
+                is_near_stop = True
+        
+        if is_heading_to_stop or is_near_stop:
+            bus_copy = dict(bus)
+            dist_to_user = haversine(lon, lat, bus_lon, bus_lat)
+            bus_copy["distance_to_user"] = round(dist_to_user, 2)
+            bus_copy["nearest_stop"] = nearest_stop["common_name"] if nearest_stop else "Unknown"
+            bus_copy["nearest_stop_dist"] = round(nearest_dist, 2)
+            relevant_buses.append(bus_copy)
     
-    if lat and lon:
-        filtered = []
-        for stop in stops:
-            try:
-                s_lat = float(stop.get("latitude", 0))
-                s_lon = float(stop.get("longitude", 0))
-                if s_lat == 0 or s_lon == 0:
-                    continue
-                dist = haversine(lon, lat, s_lon, s_lat)
-                if dist <= radius:
-                    stop_copy = dict(stop)
-                    stop_copy["distance_km"] = round(dist, 2)
-                    filtered.append(stop_copy)
-            except:
-                continue
-        filtered.sort(key=lambda x: x.get("distance_km", 999))
-        return filtered
+    # Sort by distance to user
+    relevant_buses.sort(key=lambda x: x["distance_to_user"])
     
-    return stops
+    # Add bus count to stops
+    for stop in nearby_stops:
+        count = sum(1 for b in relevant_buses 
+                   if b.get("next_stop_ref") == stop["atco_code"] 
+                   or (b.get("nearest_stop") == stop["common_name"] and b.get("nearest_stop_dist", 999) < 0.5))
+        stop["buses_approaching"] = count
+    
+    return {"stops": nearby_stops, "buses": relevant_buses}
 
+# --- API ENDPOINTS ---
 
-# --- 2. API ENDPOINTS ---
-
-@app.get("/live-buses")
-def get_live_buses(
-    lat: float = Query(..., description="User latitude"),
-    lon: float = Query(..., description="User longitude"),
-    radius: float = Query(5.0, description="Search radius in km")
+@app.get("/my-buses")
+def get_my_buses(
+    lat: float = Query(...),
+    lon: float = Query(...),
+    radius: float = Query(1.5)
 ):
-    """Get REAL live bus locations"""
-    buses = get_buses_near_location(lat, lon, radius)
-    
+    """Main endpoint - get buses approaching stops near user"""
+    result = get_buses_for_user(lat, lon, radius)
     return {
-        "buses": buses,
-        "count": len(buses),
-        "timestamp": datetime.now().isoformat(),
-        "user_location": {"lat": lat, "lon": lon},
-        "is_real_data": True
+        "stops": result["stops"],
+        "buses": result["buses"],
+        "total_buses": len(result["buses"]),
+        "total_stops": len(result["stops"]),
+        "timestamp": datetime.now().isoformat()
     }
-
-
-@app.get("/bus-trail/{bus_id}")
-def get_bus_trail(bus_id: str):
-    """Get position history for a bus"""
-    trail = BUS_HISTORY.get(bus_id, [])
-    return {
-        "bus_id": bus_id,
-        "trail": trail,
-        "count": len(trail)
-    }
-
 
 @app.get("/nearby-stops")
 def get_nearby_stops(
-    latitude: float = Query(..., description="User latitude"),
-    longitude: float = Query(..., description="User longitude"),
-    radius: float = Query(1.0, description="Search radius in km")
+    latitude: float = Query(...),
+    longitude: float = Query(...),
+    radius: float = Query(1.0)
 ):
-    """Get bus stops within radius"""
-    stops = fetch_bods_stops(latitude, longitude, radius)
-    
-    nearby_buses = get_buses_near_location(latitude, longitude, radius + 2)
-    
-    stop_bus_count = {}
-    for bus in nearby_buses:
-        next_stop = bus.get("next_stop_ref", "")
-        if next_stop:
-            stop_bus_count[next_stop] = stop_bus_count.get(next_stop, 0) + 1
-    
-    nearby = []
-    for stop in stops:
-        stop_id = stop.get("atco_code") or str(stop.get("id", ""))
-        nearby.append({
-            "stop_id": stop_id,
-            "name": stop.get("common_name", "Unknown"),
-            "distance_km": stop.get("distance_km", 0),
-            "latitude": float(stop.get("latitude", 0)),
-            "longitude": float(stop.get("longitude", 0)),
-            "locality": stop.get("locality", ""),
-            "indicator": stop.get("indicator", ""),
-            "buses_approaching": stop_bus_count.get(stop_id, 0)
-        })
-    
-    return {
-        "nearby_stops": nearby,
-        "count": len(nearby),
-        "user_location": {"latitude": latitude, "longitude": longitude}
-    }
+    """Get stops near location"""
+    stops = get_stops_near_location(latitude, longitude, radius)
+    return {"stops": stops, "count": len(stops)}
 
-
-@app.get("/stops")
-def get_all_stops(
-    lat: float = Query(None),
-    lon: float = Query(None),
-    radius: float = Query(2.0)
-):
-    """Get all bus stops"""
-    stops = fetch_bods_stops(lat, lon, radius)
-    
-    formatted = []
-    for stop in stops:
-        formatted.append({
-            "stop_id": stop.get("atco_code") or str(stop.get("id", "")),
-            "name": stop.get("common_name", "Unknown"),
-            "latitude": float(stop.get("latitude", 0)),
-            "longitude": float(stop.get("longitude", 0)),
-            "locality": stop.get("locality", ""),
-            "indicator": stop.get("indicator", ""),
-            "distance_km": stop.get("distance_km")
-        })
-    
-    return {"stops": formatted, "count": len(formatted)}
-
-
-@app.get("/stops/{stop_id}")
-def get_stop_detail(stop_id: str):
-    """Get stop details"""
-    stops = fetch_bods_stops()
-    stop_info = None
-    for stop in stops:
-        if stop.get("atco_code") == stop_id or str(stop.get("id")) == stop_id:
-            stop_info = stop
-            break
-    
-    if not stop_info:
-        raise HTTPException(status_code=404, detail="Stop not found")
-    
-    lat = float(stop_info.get("latitude", 0))
-    lon = float(stop_info.get("longitude", 0))
-    nearby_buses = get_buses_near_location(lat, lon, 10)
-    
-    upcoming = [b for b in nearby_buses if b.get("next_stop_ref") == stop_id]
-    upcoming.sort(key=lambda x: x.get("expected_arrival", ""))
-    
-    return {
-        "stop_id": stop_id,
-        "name": stop_info.get("common_name", "Unknown"),
-        "latitude": lat,
-        "longitude": lon,
-        "locality": stop_info.get("locality", ""),
-        "indicator": stop_info.get("indicator", ""),
-        "upcoming_buses": upcoming[:5]
-    }
-
-
-@app.get("/search")
+@app.get("/search-stops")
 def search_stops(
     q: str = Query(...),
     lat: float = Query(None),
     lon: float = Query(None)
 ):
     """Search stops"""
-    all_stops = fetch_bods_stops()
+    all_stops = fetch_all_stops()
     query = q.lower()
     
     results = []
     for stop in all_stops:
-        name = stop.get("common_name", "").lower()
-        locality = stop.get("locality", "").lower()
+        name = (stop.get("common_name") or "").lower()
+        locality = (stop.get("locality") or "").lower()
         
         if query in name or query in locality:
-            stop_data = {
-                "stop_id": stop.get("atco_code") or str(stop.get("id", "")),
-                "name": stop.get("common_name", "Unknown"),
-                "locality": stop.get("locality", ""),
-                "latitude": float(stop.get("latitude", 0)),
-                "longitude": float(stop.get("longitude", 0)),
-            }
+            stop_data = dict(stop)
             if lat and lon:
                 try:
-                    dist = haversine(lon, lat, float(stop.get("longitude", 0)), float(stop.get("latitude", 0)))
+                    dist = haversine(lon, lat, stop["longitude"], stop["latitude"])
                     stop_data["distance_km"] = round(dist, 2)
                 except:
                     pass
@@ -463,70 +412,47 @@ def search_stops(
     if lat and lon:
         results.sort(key=lambda x: x.get("distance_km", 999))
     
-    return {"results": results[:20], "count": len(results)}
+    return {"results": results[:30], "count": len(results)}
 
-
-@app.get("/live-buses/route/{route_id}")
-def get_buses_by_route(route_id: str):
-    """Get buses by route"""
-    all_buses = BODS_CACHE.get("buses", {})
-    filtered = [b for b in all_buses.values() if route_id.upper() in str(b.get("route", "")).upper()]
-    
-    return {
-        "route_id": route_id,
-        "buses": filtered,
-        "count": len(filtered)
-    }
-
-
-@app.get("/routes/nearby")
-def get_routes_nearby(
+@app.get("/all-buses-in-area")
+def get_all_buses(
     lat: float = Query(...),
     lon: float = Query(...),
-    radius: float = Query(3.0)
+    radius: float = Query(5.0)
 ):
-    """Get active routes"""
-    buses = get_buses_near_location(lat, lon, radius)
+    """Get all buses in area (for map)"""
+    lat_offset = radius / 111.0
+    lon_offset = radius / (111.0 * cos(radians(lat)))
     
-    routes = {}
-    for bus in buses:
-        route = bus.get("route", "Unknown")
-        if route not in routes:
-            routes[route] = {
-                "route_id": route,
-                "name": f"Route {route}",
-                "destination": bus.get("destination", "Unknown"),
-                "operator": bus.get("operator", "Unknown"),
-                "active_buses": 0,
-                "buses": []
-            }
-        routes[route]["active_buses"] += 1
-        routes[route]["buses"].append(bus)
+    buses = fetch_live_buses(lon - lon_offset, lat - lat_offset, lon + lon_offset, lat + lat_offset)
     
-    return {
-        "routes": list(routes.values()),
-        "count": len(routes)
-    }
+    result = []
+    for bus in buses.values():
+        bus_copy = dict(bus)
+        dist = haversine(lon, lat, bus["longitude"], bus["latitude"])
+        bus_copy["distance_km"] = round(dist, 2)
+        result.append(bus_copy)
+    
+    return {"buses": result, "count": len(result)}
 
-
-@app.post("/update-sensor-data")
-def update_sensor(data: dict):
-    """Receive crowd count"""
-    return {"status": "OK"}
-
+@app.get("/bus/{bus_id}")
+def get_bus(bus_id: str):
+    """Get bus details"""
+    bus = BUSES_CACHE.get("buses", {}).get(bus_id)
+    if not bus:
+        raise HTTPException(status_code=404, detail="Bus not found")
+    return bus
 
 @app.get("/health")
 def health_check():
     return {
         "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "buses_tracked": len(BODS_CACHE.get("buses", {})),
-        "version": "3.0.0"
+        "stops_available": len(DEFAULT_UK_STOPS),
+        "buses_tracked": len(BUSES_CACHE.get("buses", {})),
+        "version": "3.1.0"
     }
-
 
 if __name__ == "__main__":
     import uvicorn
-    print("Transight API v3.0 - Real-time Bus Tracking")
-    print("Parsing BODS SIRI-VM XML data")
+    print("Transight API v3.1 - Starting...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
