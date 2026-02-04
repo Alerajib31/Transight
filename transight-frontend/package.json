@@ -10,11 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mui/material": "^6.1.0",
-    "@mui/icons-material": "^6.1.0",
     "@emotion/react": "^11.11.4",
     "@emotion/styled": "^11.11.5",
+    "@mui/icons-material": "^6.1.0",
+    "@mui/material": "^6.1.0",
     "axios": "^1.7.7",
+    "gtfs-realtime-bindings": "^1.1.1",
     "leaflet": "^1.9.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
