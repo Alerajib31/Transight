@@ -125,8 +125,8 @@ def fetch_all_stops():
     """Get all stops - uses default database since BODS stops API is unreliable"""
     return DEFAULT_UK_STOPS
 
-def get_stops_near_location(lat: float, lon: float, radius: float = 1.0) -> List[dict]:
-    """Get stops within radius"""
+def get_stops_near_location(lat: float, lon: float, radius: float = 5.0) -> List[dict]:
+    """Get stops within radius - default 5km to ensure we find stops"""
     all_stops = fetch_all_stops()
     
     nearby = []
@@ -146,6 +146,24 @@ def get_stops_near_location(lat: float, lon: float, radius: float = 1.0) -> List
             continue
     
     nearby.sort(key=lambda x: x.get("distance_km", 999))
+    
+    # If no stops found in radius, return nearest 5 stops regardless of distance
+    if not nearby and radius < 50:
+        for stop in all_stops:
+            try:
+                s_lat = stop.get("latitude", 0)
+                s_lon = stop.get("longitude", 0)
+                if s_lat == 0 or s_lon == 0:
+                    continue
+                dist = haversine(lon, lat, s_lon, s_lat)
+                stop_copy = dict(stop)
+                stop_copy["distance_km"] = round(dist, 2)
+                nearby.append(stop_copy)
+            except:
+                continue
+        nearby.sort(key=lambda x: x.get("distance_km", 999))
+        nearby = nearby[:5]  # Return 5 nearest
+    
     return nearby
 
 # --- BODS BUS API ---

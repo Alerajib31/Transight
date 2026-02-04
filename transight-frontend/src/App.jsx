@@ -5,12 +5,11 @@ import {
   Paper, useTheme, useMediaQuery, InputAdornment, Chip,
   List, ListItem, ListItemButton, ListItemText, ListItemIcon,
   BottomNavigation, BottomNavigationAction, Button, Slide, Badge,
-  Autocomplete, Dialog, DialogTitle, DialogContent
+  Dialog, DialogTitle, DialogContent, Autocomplete
 } from '@mui/material';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import SearchIcon from '@mui/icons-material/Search';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
-import NavigationIcon from '@mui/icons-material/Navigation';
 import MapIcon from '@mui/icons-material/Map';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
@@ -19,7 +18,6 @@ import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 
-// Fix Leaflet icons
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
@@ -31,26 +29,19 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// Bus icon with rotation
+// Create bus icon
 const createBusIcon = (bearing, route, color) => {
   return L.divIcon({
     className: 'bus-marker',
     html: `
       <div style="
-        width: 36px; 
-        height: 36px; 
-        background: ${color}; 
-        border-radius: 50%;
+        width: 36px; height: 36px; 
+        background: ${color}; border-radius: 50%;
         border: 3px solid white;
         box-shadow: 0 3px 10px rgba(0,0,0,0.4);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-weight: bold;
-        font-size: 11px;
+        display: flex; align-items: center; justify-content: center;
+        color: white; font-weight: bold; font-size: 11px;
         transform: rotate(${bearing}deg);
-        transition: transform 0.3s ease;
       ">
         <span style="transform: rotate(${-bearing}deg)">${route}</span>
       </div>
@@ -64,8 +55,7 @@ const userIcon = L.divIcon({
   className: 'user-marker',
   html: `<div style="
     width: 20px; height: 20px;
-    background: #3b82f6;
-    border: 3px solid white;
+    background: #3b82f6; border: 3px solid white;
     border-radius: 50%;
     box-shadow: 0 2px 8px rgba(59,130,246,0.5);
   "></div>`,
@@ -92,164 +82,204 @@ const getRouteColor = (route) => {
   return routeColorMap[route];
 };
 
-// Format time
-const formatTime = (minutes) => {
-  if (minutes <= 1) return 'Due';
-  return `${Math.round(minutes)} min`;
-};
-
+const formatTime = (minutes) => minutes <= 1 ? 'Due' : `${Math.round(minutes)} min`;
 const formatDistance = (km) => km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 
-// Map component with stable center
-function MapController({ center }) {
-  const map = useMap();
-  const centerRef = useRef(center);
+// Map component - NO forced recentering
+function MapView({ userLocation, nearbyStops, relevantBuses, onStopClick }) {
+  const mapRef = useRef(null);
   
+  // Only set initial center, don't force recenter
   useEffect(() => {
-    if (center[0] !== centerRef.current[0] || center[1] !== centerRef.current[1]) {
-      centerRef.current = center;
-      map.setView(center, 15);
+    if (mapRef.current && userLocation) {
+      mapRef.current.setView(userLocation, 15);
     }
-  }, [center, map]);
-  
-  return null;
-}
+  }, []); // Empty deps - only on mount
 
-// Animated bus marker
-const BusMarker = React.memo(({ bus, isSelected, onClick }) => {
-  const markerRef = useRef(null);
-  const positionRef = useRef([bus.latitude, bus.longitude]);
-  
-  useEffect(() => {
-    if (markerRef.current) {
-      // Smooth transition to new position
-      markerRef.current.setLatLng([bus.latitude, bus.longitude]);
-    }
-    positionRef.current = [bus.latitude, bus.longitude];
-  }, [bus.latitude, bus.longitude]);
-  
-  const icon = useMemo(() => 
-    createBusIcon(bus.bearing || 0, bus.route, getRouteColor(bus.route)),
-    [bus.route, bus.bearing]
-  );
-  
   return (
-    <Marker
-      ref={markerRef}
-      position={positionRef.current}
-      icon={icon}
-      eventHandlers={{ click: () => onClick(bus) }}
-    >
-      <Popup>
-        <Box sx={{ minWidth: 180, p: 0.5 }}>
-          <Typography variant="subtitle2" fontWeight={700}>
-            {bus.route} → {bus.destination}
-          </Typography>
-          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-            {bus.operator}
-          </Typography>
-          <Typography variant="caption" display="block">
-            Speed: {Math.round(bus.speed || 0)} km/h
-          </Typography>
-          <Typography variant="caption" display="block" color={bus.delay_minutes > 0 ? 'error.main' : 'success.main'}>
-            {bus.delay_minutes > 0 ? `${bus.delay_minutes}m late` : 'On time'}
-          </Typography>
-        </Box>
-      </Popup>
-    </Marker>
+    <Box sx={{ height: '100%', position: 'relative' }}>
+      <MapContainer
+        center={userLocation || [51.4545, -2.5879]}
+        zoom={15}
+        style={{ height: "100%", width: "100%" }}
+        zoomControl={false}
+        whenCreated={(map) => { mapRef.current = map; }}
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        
+        {/* User location */}
+        {userLocation && (
+          <Marker position={userLocation} icon={userIcon}>
+            <Popup><Typography variant="subtitle2">Your Location</Typography></Popup>
+          </Marker>
+        )}
+        
+        {/* Stops */}
+        {nearbyStops.map(stop => (
+          <Marker
+            key={stop.atco_code}
+            position={[stop.latitude, stop.longitude]}
+            icon={stopIcon}
+            eventHandlers={{ click: () => onStopClick(stop) }}
+          >
+            <Popup>
+              <Typography variant="subtitle2" fontWeight={700}>{stop.common_name}</Typography>
+              <Button size="small" variant="contained" fullWidth sx={{ mt: 1 }} onClick={() => onStopClick(stop)}>
+                View Buses
+              </Button>
+            </Popup>
+          </Marker>
+        ))}
+        
+        {/* Bus trails */}
+        {relevantBuses.map(bus => bus.trail?.length > 1 && (
+          <Polyline
+            key={`trail-${bus.bus_id}`}
+            positions={bus.trail.map(p => [p.lat, p.lon])}
+            pathOptions={{ color: getRouteColor(bus.route), weight: 2, opacity: 0.4, dashArray: '5,5' }}
+          />
+        ))}
+        
+        {/* Buses - using stable positions */}
+        {relevantBuses.map(bus => (
+          <Marker
+            key={bus.bus_id}
+            position={[bus.latitude, bus.longitude]}
+            icon={createBusIcon(bus.bearing || 0, bus.route, getRouteColor(bus.route))}
+          >
+            <Popup>
+              <Box sx={{ minWidth: 180 }}>
+                <Typography variant="subtitle2" fontWeight={700}>{bus.route} → {bus.destination}</Typography>
+                <Typography variant="caption" display="block">{bus.operator}</Typography>
+                <Typography variant="caption" display="block">Speed: {Math.round(bus.speed || 0)} km/h</Typography>
+                <Typography variant="caption" color={bus.delay_minutes > 0 ? 'error.main' : 'success.main'}>
+                  {bus.delay_minutes > 0 ? `${bus.delay_minutes}m late` : 'On time'}
+                </Typography>
+              </Box>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+      
+      {/* Controls */}
+      <Box sx={{ position: 'absolute', bottom: 80, right: 16, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <IconButton sx={{ bgcolor: '#1e3a8a', color: 'white', '&:hover': { bgcolor: '#1e40af' }, boxShadow: 3 }}>
+          <MyLocationIcon />
+        </IconButton>
+      </Box>
+      
+      {/* Info */}
+      <Paper sx={{ position: 'absolute', top: 16, left: 16, bgcolor: 'rgba(10,14,39,0.9)', px: 2, py: 1 }}>
+        <Typography variant="body2" color="white">{relevantBuses.length} buses nearby</Typography>
+      </Paper>
+    </Box>
   );
-});
+}
 
 // Main App
 function App() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   
-  // Navigation
+  // State
   const [activeTab, setActiveTab] = useState(0);
-  const [selectedStop, setSelectedStop] = useState(null);
-  const [selectedBus, setSelectedBus] = useState(null);
-  const [showJourneySearch, setShowJourneySearch] = useState(false);
-  
-  // Location
   const [userLocation, setUserLocation] = useState(null);
-  const [locationError, setLocationError] = useState(false);
-  
-  // Data
   const [nearbyStops, setNearbyStops] = useState([]);
   const [relevantBuses, setRelevantBuses] = useState([]);
-  const [allBuses, setAllBuses] = useState([]);
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedStop, setSelectedStop] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [loading, setLoading] = useState(false);
   
-  // Destination search
-  const [destSearch, setDestSearch] = useState('');
-  const [destOptions, setDestOptions] = useState([]);
-  const [selectedDest, setSelectedDest] = useState(null);
+  // Journey search state - SEPARATE to prevent re-render issues
+  const [journeyDialogOpen, setJourneyDialogOpen] = useState(false);
+  const [destinationQuery, setDestinationQuery] = useState('');
+  const [destinationResults, setDestinationResults] = useState([]);
+  const [selectedDestination, setSelectedDestination] = useState(null);
+  
+  // Search tab state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   
   const API_BASE_URL = "http://127.0.0.1:8000";
-  const mapRef = useRef(null);
   
-  // Get user location
-  const getUserLocation = useCallback(() => {
+  // Get location once on mount
+  useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const loc = [pos.coords.latitude, pos.coords.longitude];
-          setUserLocation(loc);
-          setLocationError(false);
+          setUserLocation([pos.coords.latitude, pos.coords.longitude]);
         },
         (err) => {
-          console.error("Geolocation error:", err);
-          setLocationError(true);
-          // Default to Bristol for testing
+          console.log("Geolocation failed, using Bristol");
           setUserLocation([51.4545, -2.5879]);
-        },
-        { enableHighAccuracy: true }
+        }
       );
+    } else {
+      setUserLocation([51.4545, -2.5879]);
     }
   }, []);
   
-  // Fetch my buses (buses approaching my stops)
-  const fetchMyBuses = useCallback(async () => {
+  // Fetch data when location available - with larger radius
+  const fetchData = useCallback(async () => {
     if (!userLocation) return;
     
+    setLoading(true);
     try {
+      // Use larger radius (5km) to find stops
       const res = await axios.get(`${API_BASE_URL}/my-buses`, {
-        params: { lat: userLocation[0], lon: userLocation[1], radius: 1.5 }
+        params: { lat: userLocation[0], lon: userLocation[1], radius: 5.0 }
       });
       
       setNearbyStops(res.data.stops || []);
       setRelevantBuses(res.data.buses || []);
       setLastUpdate(new Date());
     } catch (e) {
-      console.error("Error fetching buses:", e);
+      console.error("Error:", e);
+    } finally {
+      setLoading(false);
     }
   }, [userLocation]);
   
-  // Fetch all buses for map
-  const fetchAllBuses = useCallback(async () => {
-    if (!userLocation) return;
+  // Initial fetch and interval
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 15000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+  
+  // Destination search - debounced
+  useEffect(() => {
+    if (!destinationQuery || destinationQuery.length < 2) {
+      setDestinationResults([]);
+      return;
+    }
     
-    try {
-      const res = await axios.get(`${API_BASE_URL}/all-buses-in-area`, {
-        params: { lat: userLocation[0], lon: userLocation[1], radius: 8 }
-      });
-      setAllBuses(res.data.buses || []);
-    } catch (e) {
-      console.error("Error fetching all buses:", e);
-    }
-  }, [userLocation]);
+    const timer = setTimeout(async () => {
+      try {
+        const params = { q: destinationQuery };
+        if (userLocation) {
+          params.lat = userLocation[0];
+          params.lon = userLocation[1];
+        }
+        const res = await axios.get(`${API_BASE_URL}/search-stops`, { params });
+        setDestinationResults(res.data.results || []);
+      } catch (e) {
+        console.error("Search error:", e);
+      }
+    }, 400);
+    
+    return () => clearTimeout(timer);
+  }, [destinationQuery, userLocation]);
   
-  // Search stops
-  const searchStops = useCallback(async (query) => {
-    if (!query) {
+  // Search tab search
+  const handleSearch = useCallback(async (query) => {
+    if (!query || query.length < 2) {
       setSearchResults([]);
       return;
     }
     
+    setSearchLoading(true);
     try {
       const params = { q: query };
       if (userLocation) {
@@ -260,59 +290,12 @@ function App() {
       setSearchResults(res.data.results || []);
     } catch (e) {
       console.error("Search error:", e);
+    } finally {
+      setSearchLoading(false);
     }
   }, [userLocation]);
   
-  // Destination search
-  const searchDestination = useCallback(async (query) => {
-    if (!query || query.length < 2) {
-      setDestOptions([]);
-      return;
-    }
-    
-    try {
-      const res = await axios.get(`${API_BASE_URL}/search-stops`, {
-        params: { q: query, lat: userLocation?.[0], lon: userLocation?.[1] }
-      });
-      setDestOptions(res.data.results || []);
-    } catch (e) {
-      console.error("Dest search error:", e);
-    }
-  }, [userLocation]);
-  
-  // Initial load
-  useEffect(() => {
-    getUserLocation();
-  }, [getUserLocation]);
-  
-  // Auto-refresh
-  useEffect(() => {
-    if (!userLocation) return;
-    
-    fetchMyBuses();
-    fetchAllBuses();
-    
-    const interval = setInterval(() => {
-      fetchMyBuses();
-      fetchAllBuses();
-    }, 10000);
-    
-    return () => clearInterval(interval);
-  }, [userLocation, fetchMyBuses, fetchAllBuses]);
-  
-  // Debounced search
-  useEffect(() => {
-    const t = setTimeout(() => searchStops(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery, searchStops]);
-  
-  // Debounced destination search
-  useEffect(() => {
-    const t = setTimeout(() => searchDestination(destSearch), 400);
-    return () => clearTimeout(t);
-  }, [destSearch, searchDestination]);
-  
-  // Views
+  // Nearby View
   const NearbyView = () => (
     <Box sx={{ height: '100%', overflow: 'auto', bgcolor: '#0a0e27' }}>
       <AppBar position="sticky" sx={{ bgcolor: '#1e3a8a' }}>
@@ -328,54 +311,23 @@ function App() {
           <Button 
             variant="contained" 
             size="small"
-            onClick={() => setShowJourneySearch(true)}
-            sx={{ bgcolor: '#10b981', '&:hover': { bgcolor: '#059669' } }}
+            onClick={() => setJourneyDialogOpen(true)}
+            sx={{ bgcolor: '#10b981', mr: 1 }}
           >
             Plan Journey
           </Button>
-          <IconButton color="inherit" onClick={getUserLocation} sx={{ ml: 1 }}>
+          <IconButton color="inherit" onClick={fetchData}>
             <MyLocationIcon />
           </IconButton>
         </Toolbar>
       </AppBar>
       
       <Box sx={{ p: 2 }}>
-        {/* Active Routes */}
-        {relevantBuses.length > 0 && (
-          <>
-            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', mb: 1.5, display: 'block' }}>
-              BUSES NEAR YOU ({relevantBuses.length})
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
-              {Object.entries(
-                relevantBuses.reduce((acc, b) => {
-                  acc[b.route] = (acc[b.route] || 0) + 1;
-                  return acc;
-                }, {})
-              ).map(([route, count]) => (
-                <Chip 
-                  key={route}
-                  label={`${route} (${count})`}
-                  size="small"
-                  sx={{ 
-                    bgcolor: `${getRouteColor(route)}30`,
-                    color: getRouteColor(route),
-                    border: `1px solid ${getRouteColor(route)}50`,
-                    fontWeight: 600
-                  }}
-                  onClick={() => setSelectedBus(relevantBuses.find(b => b.route === route))}
-                />
-              ))}
-            </Box>
-          </>
-        )}
-        
-        {/* Stops with approaching buses */}
-        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', mb: 1.5, display: 'block' }}>
-          NEARBY STOPS ({nearbyStops.length})
-        </Typography>
-        
-        {nearbyStops.length === 0 ? (
+        {loading && nearbyStops.length === 0 ? (
+          <Box display="flex" justifyContent="center" py={8}>
+            <CircularProgress sx={{ color: '#6366f1' }} />
+          </Box>
+        ) : nearbyStops.length === 0 ? (
           <Paper sx={{ p: 4, textAlign: 'center', bgcolor: 'rgba(255,255,255,0.05)' }}>
             <LocationOnIcon sx={{ fontSize: 48, opacity: 0.3, mb: 1, color: 'white' }} />
             <Typography color="rgba(255,255,255,0.6)">No stops found nearby</Typography>
@@ -384,47 +336,80 @@ function App() {
             </Typography>
             <Button 
               variant="outlined" 
-              size="small"
-              onClick={() => setShowJourneySearch(true)}
               sx={{ mt: 2, color: '#6366f1', borderColor: '#6366f1' }}
+              onClick={() => setJourneyDialogOpen(true)}
             >
               Plan a Journey
             </Button>
           </Paper>
         ) : (
-          <List sx={{ gap: 1, display: 'flex', flexDirection: 'column' }}>
-            {nearbyStops.map((stop, idx) => {
-              const stopBuses = relevantBuses.filter(b => b.next_stop_ref === stop.atco_code);
-              
-              return (
-                <Slide key={stop.atco_code} direction="up" in={true} style={{ transitionDelay: idx * 30 }}>
-                  <Paper 
-                    component={ListItemButton}
-                    onClick={() => setSelectedStop(stop)}
-                    sx={{ 
-                      bgcolor: stopBuses.length > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(30, 41, 59, 0.8)', 
-                      border: stopBuses.length > 0 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(99, 102, 241, 0.2)',
-                      '&:hover': { bgcolor: stopBuses.length > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.15)' }
-                    }}
-                  >
-                    <ListItemIcon>
-                      <Box sx={{ 
-                        width: 40, height: 40, 
-                        bgcolor: stopBuses.length > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)', 
-                        borderRadius: '50%',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        <LocationOnIcon sx={{ color: stopBuses.length > 0 ? '#10b981' : '#6366f1' }} />
-                      </Box>
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary={
-                        <Typography variant="subtitle1" fontWeight={600} color="white">
-                          {stop.common_name}
-                        </Typography>
-                      }
-                      secondary={
-                        <>
+          <>
+            {/* Active Routes */}
+            {relevantBuses.length > 0 && (
+              <>
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', mb: 1.5, display: 'block' }}>
+                  BUSES NEAR YOU ({relevantBuses.length})
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
+                  {Object.entries(
+                    relevantBuses.reduce((acc, b) => {
+                      acc[b.route] = (acc[b.route] || 0) + 1;
+                      return acc;
+                    }, {})
+                  ).map(([route, count]) => (
+                    <Chip 
+                      key={route}
+                      label={`${route} (${count})`}
+                      size="small"
+                      sx={{ 
+                        bgcolor: `${getRouteColor(route)}30`,
+                        color: getRouteColor(route),
+                        border: `1px solid ${getRouteColor(route)}50`,
+                        fontWeight: 600
+                      }}
+                    />
+                  ))}
+                </Box>
+              </>
+            )}
+            
+            {/* Stops */}
+            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.6)', mb: 1.5, display: 'block' }}>
+              NEARBY STOPS ({nearbyStops.length})
+            </Typography>
+            
+            <List sx={{ gap: 1, display: 'flex', flexDirection: 'column' }}>
+              {nearbyStops.map((stop, idx) => {
+                const stopBuses = relevantBuses.filter(b => 
+                  b.next_stop_ref === stop.atco_code || 
+                  (b.nearest_stop === stop.common_name && b.nearest_stop_dist < 0.5)
+                );
+                
+                return (
+                  <Slide key={stop.atco_code} direction="up" in={true} style={{ transitionDelay: idx * 30 }}>
+                    <Paper 
+                      onClick={() => setSelectedStop(stop)}
+                      sx={{ 
+                        p: 2,
+                        cursor: 'pointer',
+                        bgcolor: stopBuses.length > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(30, 41, 59, 0.8)', 
+                        border: stopBuses.length > 0 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(99, 102, 241, 0.2)',
+                        '&:hover': { bgcolor: stopBuses.length > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.15)' }
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Box sx={{ 
+                          width: 40, height: 40, 
+                          bgcolor: stopBuses.length > 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.2)', 
+                          borderRadius: '50%',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}>
+                          <LocationOnIcon sx={{ color: stopBuses.length > 0 ? '#10b981' : '#6366f1' }} />
+                        </Box>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="subtitle1" fontWeight={600} color="white">
+                            {stop.common_name}
+                          </Typography>
                           <Typography variant="caption" color="rgba(255,255,255,0.5)">
                             {stop.indicator} {stop.locality} • {formatDistance(stop.distance_km)}
                           </Typography>
@@ -433,134 +418,117 @@ function App() {
                               {stopBuses.slice(0, 3).map(b => (
                                 <Chip 
                                   key={b.bus_id}
-                                  label={`${b.route} ${formatTime(Math.max(1, b.distance_to_user * 3))}`}
+                                  label={`${b.route}`}
                                   size="small"
-                                  sx={{ 
-                                    height: 20, fontSize: '0.7rem',
-                                    bgcolor: getRouteColor(b.route),
-                                    color: 'white'
-                                  }}
+                                  sx={{ height: 20, fontSize: '0.7rem', bgcolor: getRouteColor(b.route), color: 'white' }}
                                 />
                               ))}
-                              {stopBuses.length > 3 && (
-                                <Typography variant="caption" color="#10b981">
-                                  +{stopBuses.length - 3} more
-                                </Typography>
-                              )}
                             </Box>
                           )}
-                        </>
-                      }
-                    />
-                    {stopBuses.length > 0 && (
-                      <Badge badgeContent={stopBuses.length} color="success" />
-                    )}
-                  </Paper>
-                </Slide>
-              );
-            })}
+                        </Box>
+                        {stopBuses.length > 0 && (
+                          <Badge badgeContent={stopBuses.length} color="success" />
+                        )}
+                      </Box>
+                    </Paper>
+                  </Slide>
+                );
+              })}
+            </List>
+          </>
+        )}
+      </Box>
+    </Box>
+  );
+  
+  // Search Tab View
+  const SearchView = () => (
+    <Box sx={{ height: '100%', overflow: 'auto', bgcolor: '#0a0e27' }}>
+      <AppBar position="sticky" sx={{ bgcolor: '#1e3a8a' }}>
+        <Toolbar>
+          <TextField
+            fullWidth
+            placeholder="Search for a stop..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              handleSearch(e.target.value);
+            }}
+            autoFocus
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: 'rgba(255,255,255,0.5)' }} />
+                </InputAdornment>
+              ),
+              sx: {
+                bgcolor: 'rgba(255,255,255,0.1)',
+                borderRadius: 2,
+                color: 'white',
+                '& input::placeholder': { color: 'rgba(255,255,255,0.5)' },
+                '& fieldset': { border: 'none' }
+              }
+            }}
+          />
+        </Toolbar>
+      </AppBar>
+      
+      <Box sx={{ p: 2 }}>
+        {searchLoading ? (
+          <Box display="flex" justifyContent="center" py={4}>
+            <CircularProgress sx={{ color: '#6366f1' }} />
+          </Box>
+        ) : searchQuery.length < 2 ? (
+          <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)' }}>
+            <SearchIcon sx={{ fontSize: 48, opacity: 0.3, mb: 1 }} />
+            <Typography>Type at least 2 characters to search</Typography>
+          </Paper>
+        ) : searchResults.length === 0 ? (
+          <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)' }}>
+            <Typography>No stops found</Typography>
+          </Paper>
+        ) : (
+          <List sx={{ gap: 1, display: 'flex', flexDirection: 'column' }}>
+            {searchResults.map((stop) => (
+              <Paper 
+                key={stop.atco_code}
+                onClick={() => {
+                  setSelectedStop(stop);
+                  setActiveTab(0);
+                }}
+                sx={{ 
+                  p: 2,
+                  cursor: 'pointer',
+                  bgcolor: 'rgba(30, 41, 59, 0.8)', 
+                  border: '1px solid rgba(99, 102, 241, 0.2)',
+                  '&:hover': { bgcolor: 'rgba(99, 102, 241, 0.15)' }
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <LocationOnIcon sx={{ color: '#6366f1' }} />
+                  <Box>
+                    <Typography fontWeight={600} color="white">{stop.common_name}</Typography>
+                    <Typography variant="caption" color="rgba(255,255,255,0.5)">
+                      {stop.locality} {stop.distance_km && `• ${formatDistance(stop.distance_km)}`}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
+            ))}
           </List>
         )}
       </Box>
     </Box>
   );
   
-  // Map View - Optimized to prevent re-renders
-  const MapView = () => {
-    const mapCenter = useMemo(() => userLocation || [51.4545, -2.5879], [userLocation]);
-    
-    return (
-      <Box sx={{ height: '100%', position: 'relative' }}>
-        <MapContainer 
-          center={mapCenter}
-          zoom={15}
-          style={{ height: "100%", width: "100%" }}
-          zoomControl={false}
-          whenCreated={(map) => { mapRef.current = map; }}
-        >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          <MapController center={mapCenter} />
-          
-          {/* User location */}
-          {userLocation && (
-            <Marker position={userLocation} icon={userIcon}>
-              <Popup><Typography variant="subtitle2">Your Location</Typography></Popup>
-            </Marker>
-          )}
-          
-          {/* Nearby stops */}
-          {nearbyStops.map(stop => (
-            <Marker
-              key={stop.atco_code}
-              position={[stop.latitude, stop.longitude]}
-              icon={stopIcon}
-              eventHandlers={{ click: () => setSelectedStop(stop) }}
-            >
-              <Popup>
-                <Typography variant="subtitle2" fontWeight={700}>{stop.common_name}</Typography>
-                <Button size="small" variant="contained" fullWidth sx={{ mt: 1 }} onClick={() => setSelectedStop(stop)}>
-                  View Buses
-                </Button>
-              </Popup>
-            </Marker>
-          ))}
-          
-          {/* Bus trails */}
-          {relevantBuses.map(bus => bus.trail?.length > 1 && (
-            <Polyline
-              key={`trail-${bus.bus_id}`}
-              positions={bus.trail.map(p => [p.lat, p.lon])}
-              pathOptions={{ color: getRouteColor(bus.route), weight: 2, opacity: 0.4, dashArray: '5,5' }}
-            />
-          ))}
-          
-          {/* Relevant buses only */}
-          {relevantBuses.map(bus => (
-            <BusMarker
-              key={bus.bus_id}
-              bus={bus}
-              isSelected={selectedBus?.bus_id === bus.bus_id}
-              onClick={setSelectedBus}
-            />
-          ))}
-        </MapContainer>
-        
-        {/* Controls */}
-        <Box sx={{ position: 'absolute', bottom: 80, right: 16, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <IconButton 
-            onClick={getUserLocation}
-            sx={{ bgcolor: '#1e3a8a', color: 'white', '&:hover': { bgcolor: '#1e40af' }, boxShadow: 3 }}
-          >
-            <MyLocationIcon />
-          </IconButton>
-        </Box>
-        
-        {/* Info panel */}
-        <Box sx={{ 
-          position: 'absolute', top: 16, left: 16, right: 16,
-          display: 'flex', justifyContent: 'space-between'
-        }}>
-          <Paper sx={{ bgcolor: 'rgba(10,14,39,0.9)', backdropFilter: 'blur(10px)', px: 2, py: 1, borderRadius: 2 }}>
-            <Typography variant="body2" color="white">
-              {relevantBuses.length} buses near you
-            </Typography>
-          </Paper>
-          
-          <Paper sx={{ bgcolor: 'rgba(10,14,39,0.9)', backdropFilter: 'blur(10px)', px: 2, py: 1, borderRadius: 2 }}>
-            <Typography variant="caption" color="rgba(255,255,255,0.6)">
-              {lastUpdate?.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}
-            </Typography>
-          </Paper>
-        </Box>
-      </Box>
-    );
-  };
-  
-  // Stop detail dialog
+  // Stop Detail Dialog
   const StopDetailDialog = () => {
     if (!selectedStop) return null;
     
-    const stopBuses = relevantBuses.filter(b => b.next_stop_ref === selectedStop.atco_code);
+    const stopBuses = relevantBuses.filter(b => 
+      b.next_stop_ref === selectedStop.atco_code || 
+      (b.nearest_stop === selectedStop.common_name && b.nearest_stop_dist < 0.5)
+    );
     
     return (
       <Dialog open={!!selectedStop} onClose={() => setSelectedStop(null)} fullScreen={isMobile}>
@@ -568,7 +536,7 @@ function App() {
           <IconButton color="inherit" onClick={() => setSelectedStop(null)}>
             <ArrowBackIcon />
           </IconButton>
-          <Box sx={{ flex: 1 }}>
+          <Box>
             <Typography variant="h6" fontWeight={700}>{selectedStop.common_name}</Typography>
             <Typography variant="caption" sx={{ opacity: 0.8 }}>
               {selectedStop.indicator} {selectedStop.locality}
@@ -581,46 +549,44 @@ function App() {
               No buses currently approaching this stop
             </Typography>
           ) : (
-            <List>
+            <List sx={{ gap: 1, display: 'flex', flexDirection: 'column' }}>
               {stopBuses.map((bus, idx) => (
                 <Slide key={bus.bus_id} direction="up" in={true} style={{ transitionDelay: idx * 50 }}>
-                  <Paper sx={{ mb: 1, bgcolor: 'rgba(30,41,59,0.8)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                    <ListItem>
-                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 2 }}>
-                        <Box sx={{ 
-                          minWidth: 56, height: 56, 
-                          bgcolor: getRouteColor(bus.route), 
-                          borderRadius: 2,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: '1.25rem', fontWeight: 800, color: 'white'
-                        }}>
-                          {bus.route}
-                        </Box>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="subtitle1" fontWeight={700} color="white">
-                            {bus.destination}
-                          </Typography>
-                          <Typography variant="caption" color="rgba(255,255,255,0.6)">
-                            {bus.operator} • {Math.round(bus.speed || 0)} km/h
-                          </Typography>
-                          <Chip 
-                            size="small" 
-                            label={bus.delay_minutes > 0 ? `${bus.delay_minutes}m late` : 'On time'}
-                            sx={{ 
-                              mt: 0.5, height: 20,
-                              bgcolor: bus.delay_minutes > 2 ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)',
-                              color: bus.delay_minutes > 2 ? '#ef4444' : '#22c55e',
-                              fontSize: '0.7rem'
-                            }} 
-                          />
-                        </Box>
-                        <Box sx={{ textAlign: 'right' }}>
-                          <Typography variant="h5" fontWeight={800} color="#22c55e">
-                            {formatTime(Math.max(1, bus.distance_to_user * 3))}
-                          </Typography>
-                        </Box>
+                  <Paper sx={{ p: 2, bgcolor: 'rgba(30,41,59,0.8)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Box sx={{ 
+                        minWidth: 56, height: 56, 
+                        bgcolor: getRouteColor(bus.route), 
+                        borderRadius: 2,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '1.25rem', fontWeight: 800, color: 'white'
+                      }}>
+                        {bus.route}
                       </Box>
-                    </ListItem>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="subtitle1" fontWeight={700} color="white">
+                          {bus.destination}
+                        </Typography>
+                        <Typography variant="caption" color="rgba(255,255,255,0.6)">
+                          {bus.operator}
+                        </Typography>
+                        <Chip 
+                          size="small" 
+                          label={bus.delay_minutes > 0 ? `${bus.delay_minutes}m late` : 'On time'}
+                          sx={{ 
+                            mt: 0.5, height: 20,
+                            bgcolor: bus.delay_minutes > 2 ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)',
+                            color: bus.delay_minutes > 2 ? '#ef4444' : '#22c55e',
+                            fontSize: '0.7rem'
+                          }} 
+                        />
+                      </Box>
+                      <Box sx={{ textAlign: 'right' }}>
+                        <Typography variant="h5" fontWeight={800} color="#22c55e">
+                          {formatTime(Math.max(1, bus.distance_to_user * 3))}
+                        </Typography>
+                      </Box>
+                    </Box>
                   </Paper>
                 </Slide>
               ))}
@@ -631,64 +597,76 @@ function App() {
     );
   };
   
-  // Journey search dialog
-  const JourneySearchDialog = () => (
-    <Dialog open={showJourneySearch} onClose={() => setShowJourneySearch(false)} fullWidth maxWidth="sm">
+  // Journey Dialog - FIXED to not reset input
+  const JourneyDialog = () => (
+    <Dialog open={journeyDialogOpen} onClose={() => setJourneyDialogOpen(false)} fullWidth maxWidth="sm">
       <DialogTitle sx={{ bgcolor: '#1e3a8a', color: 'white' }}>
         Plan Your Journey
-        <IconButton color="inherit" onClick={() => setShowJourneySearch(false)} sx={{ position: 'absolute', right: 8, top: 8 }}>
+        <IconButton color="inherit" onClick={() => setJourneyDialogOpen(false)} sx={{ position: 'absolute', right: 8, top: 8 }}>
           <CloseIcon />
         </IconButton>
       </DialogTitle>
       <DialogContent sx={{ bgcolor: '#0a0e27', pt: 3 }}>
         <Typography variant="body2" color="rgba(255,255,255,0.6)" sx={{ mb: 2 }}>
-          Search for your destination to find buses from your nearest stops
+          Enter your destination to find buses from your nearest stops
         </Typography>
         
-        <Autocomplete
-          options={destOptions}
-          getOptionLabel={(opt) => `${opt.common_name}${opt.locality ? ', ' + opt.locality : ''}`}
-          inputValue={destSearch}
-          onInputChange={(e, v) => setDestSearch(v)}
-          onChange={(e, v) => setSelectedDest(v)}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Where do you want to go?"
-              fullWidth
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  bgcolor: 'rgba(255,255,255,0.1)',
-                  color: 'white',
-                  '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' }
-                },
-                '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.6)' }
-              }}
-            />
-          )}
+        <TextField
+          fullWidth
+          label="Where do you want to go?"
+          value={destinationQuery}
+          onChange={(e) => setDestinationQuery(e.target.value)}
+          autoFocus
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              bgcolor: 'rgba(255,255,255,0.1)',
+              color: 'white',
+              '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' }
+            },
+            '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.6)' }
+          }}
         />
         
-        {selectedDest && (
-          <Box sx={{ mt: 3 }}>
-            <Typography variant="subtitle2" color="white" fontWeight={700}>
-              Destination: {selectedDest.common_name}
-            </Typography>
-            <Typography variant="caption" color="rgba(255,255,255,0.6)">
-              {selectedDest.locality}
-            </Typography>
-            <Button
-              variant="contained"
-              fullWidth
-              sx={{ mt: 2, bgcolor: '#6366f1' }}
-              onClick={() => {
-                setShowJourneySearch(false);
-                // Could add journey planning logic here
-                setActiveTab(0);
-              }}
-            >
-              Find Buses
-            </Button>
-          </Box>
+        {destinationResults.length > 0 && (
+          <List sx={{ mt: 2, maxHeight: 300, overflow: 'auto' }}>
+            {destinationResults.map((stop) => (
+              <Paper
+                key={stop.atco_code}
+                onClick={() => {
+                  setSelectedDestination(stop);
+                  setDestinationQuery(stop.common_name);
+                }}
+                sx={{
+                  mb: 1,
+                  p: 2,
+                  cursor: 'pointer',
+                  bgcolor: selectedDestination?.atco_code === stop.atco_code ? 'rgba(99,102,241,0.3)' : 'rgba(30,41,59,0.8)',
+                  border: '1px solid rgba(99,102,241,0.2)',
+                  '&:hover': { bgcolor: 'rgba(99,102,241,0.2)' }
+                }}
+              >
+                <Typography fontWeight={600} color="white">{stop.common_name}</Typography>
+                <Typography variant="caption" color="rgba(255,255,255,0.5)">
+                  {stop.locality} {stop.distance_km && `• ${formatDistance(stop.distance_km)}`}
+                </Typography>
+              </Paper>
+            ))}
+          </List>
+        )}
+        
+        {selectedDestination && (
+          <Button
+            variant="contained"
+            fullWidth
+            sx={{ mt: 2, bgcolor: '#6366f1' }}
+            onClick={() => {
+              setJourneyDialogOpen(false);
+              setActiveTab(0);
+              // Could filter buses here based on destination
+            }}
+          >
+            Show Buses to {selectedDestination.common_name}
+          </Button>
         )}
       </DialogContent>
     </Dialog>
@@ -696,15 +674,17 @@ function App() {
   
   return (
     <Box sx={{ width: '100%', height: '100vh', overflow: 'hidden', bgcolor: '#0a0e27' }}>
-      <style>{`
-        .bus-marker { background: transparent !important; border: none !important; }
-        .user-marker { background: transparent !important; border: none !important; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-      `}</style>
-      
       <Box sx={{ height: 'calc(100vh - 70px)', overflow: 'hidden' }}>
         {activeTab === 0 && <NearbyView />}
-        {activeTab === 2 && <MapView />}
+        {activeTab === 1 && <SearchView />}
+        {activeTab === 2 && (
+          <MapView 
+            userLocation={userLocation}
+            nearbyStops={nearbyStops}
+            relevantBuses={relevantBuses}
+            onStopClick={setSelectedStop}
+          />
+        )}
       </Box>
       
       <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, bgcolor: '#0f172a', borderTop: '1px solid rgba(99,102,241,0.2)', zIndex: 1000 }} elevation={0}>
@@ -723,7 +703,7 @@ function App() {
       </Paper>
       
       <StopDetailDialog />
-      <JourneySearchDialog />
+      <JourneyDialog />
     </Box>
   );
 }
