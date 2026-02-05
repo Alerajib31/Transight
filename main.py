@@ -539,7 +539,7 @@ def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: fl
 
 
 def get_buses_for_stop(stop_id: str, user_lat: float, user_lon: float):
-    """Get buses approaching a specific stop with real-time positions, trail, and predictions."""
+    """Get buses approaching a specific stop with real-time positions, trail, and LIVE predictions."""
     # Lookup stop in directory
     stop_info = None
     sensor_id = None
@@ -550,19 +550,58 @@ def get_buses_for_stop(stop_id: str, user_lat: float, user_lon: float):
             break
     
     if not stop_info:
-        print(f"⚠️  Stop {stop_id} not found in directory")
+        print(f"[WARNING] Stop {stop_id} not found in directory")
         return None
     
     stop_info["sensor_id"] = sensor_id
-    print(f"🔍 Looking for buses near: {stop_info['name']} ({stop_id})")
+    print(f"[STOP] Looking for buses near: {stop_info['name']} ({stop_id})")
     
-    # Get latest crowd data and predictions for this stop
-    stop_data = get_latest_stop_data(sensor_id or stop_id)
-    print(f"📊 Stop data: crowd={stop_data['crowd_count']}, predicted_delay={stop_data['predicted_delay']:.1f}min")
+    # ===================================================================
+    # STEP 1: Get LIVE traffic data from TomTom API (not from database!)
+    # ===================================================================
+    print(f"[TOMTOM] Fetching fresh traffic data for {stop_info['name']}...")
+    traffic_data = get_tomtom_traffic(stop_info["lat"], stop_info["lng"])
+    traffic_delay = traffic_data.get("traffic_delay_min", 0)
     
-    # Fetch all buses in Greater Bristol area
+    if traffic_data.get("status") == "success":
+        print(f"[TOMTOM] Traffic: {traffic_data.get('current_speed_kph')}/{traffic_data.get('free_flow_speed_kph')} km/h, delay: {traffic_delay}min")
+    else:
+        print(f"[TOMTOM] Using fallback (no API or error), delay: {traffic_delay}min")
+    
+    # ===================================================================
+    # STEP 2: Get crowd data from database (cv_counter)
+    # ===================================================================
+    db_data = get_latest_stop_data(sensor_id or stop_id)
+    crowd_count = db_data.get("crowd_count", 0)
+    is_live = db_data.get("is_live", False)
+    
+    if crowd_count > 0:
+        print(f"[CROWD] Found {crowd_count} people (from {'live sensor' if is_live else 'database'})")
+    else:
+        print(f"[CROWD] No crowd data (crowd_count = 0)")
+    
+    # ===================================================================
+    # STEP 3: Calculate prediction with LIVE traffic + crowd data
+    # ===================================================================
+    predicted_delay = predict_arrival_delay(traffic_delay, crowd_count, is_raining=False)
+    print(f"[PREDICT] Traffic: {traffic_delay}min + Crowd: {crowd_count} people = {predicted_delay:.1f}min total delay")
+    
+    # Prepare stop data for response
+    stop_data = {
+        "crowd_count": crowd_count,
+        "traffic_delay": traffic_delay,
+        "traffic_status": traffic_data.get("status", "unknown"),
+        "current_speed": traffic_data.get("current_speed_kph", 0),
+        "predicted_delay": predicted_delay,
+        "is_live": is_live,
+        "source": "live" if is_live else ("default" if crowd_count == 0 else "historical")
+    }
+    
+    # ===================================================================
+    # STEP 4: Fetch buses from BODS API
+    # ===================================================================
     all_buses = fetch_live_buses(-2.75, 51.38, -2.45, 51.55)
-    print(f"🔍 Total buses in area: {len(all_buses)}")
+    print(f"[BODS] Found {len(all_buses)} total buses in area")
     
     # Find buses heading to or near this stop
     stop_buses = []
@@ -582,15 +621,18 @@ def get_buses_for_stop(stop_id: str, user_lat: float, user_lon: float):
         is_near_stop = dist_to_stop < 3.0  # Within 3km
         
         if is_heading_to_stop or is_near_stop:
-            print(f"  🚌 Bus {bus_id} (Route {bus_route}) near stop: {dist_to_stop:.2f}km")
+            print(f"  [BUS] {bus_id} ({bus_route}) at {dist_to_stop:.2f}km, {bus.get('speed', 0)}km/h")
             bus_copy = dict(bus)
             bus_copy["distance_to_stop"] = round(dist_to_stop, 2)
             bus_copy["distance_to_user"] = round(haversine(user_lon, user_lat, bus["longitude"], bus["latitude"]), 2)
             
-            # Calculate ETA based on distance and average speed (assume 20 km/h in city)
+            # Calculate ETA with LIVE predicted delay
             avg_speed_kmh = max(bus.get("speed", 20), 15)  # Min 15 km/h
-            eta_minutes = (dist_to_stop / avg_speed_kmh) * 60 + stop_data['predicted_delay']
+            travel_time = (dist_to_stop / avg_speed_kmh) * 60
+            eta_minutes = travel_time + predicted_delay
             bus_copy["eta_minutes"] = round(eta_minutes, 1)
+            bus_copy["travel_time"] = round(travel_time, 1)
+            bus_copy["predicted_delay"] = round(predicted_delay, 1)
             
             # Include trail if available
             if bus_id in BUS_HISTORY and len(BUS_HISTORY[bus_id]) > 1:
@@ -603,7 +645,7 @@ def get_buses_for_stop(stop_id: str, user_lat: float, user_lon: float):
     # Sort by ETA
     stop_buses.sort(key=lambda x: x["eta_minutes"])
     
-    print(f"✅ Returning {len(stop_buses)} buses for stop {stop_id}")
+    print(f"[DONE] Returning {len(stop_buses)} buses for {stop_info['name']}")
     
     return {
         "stop": stop_info,

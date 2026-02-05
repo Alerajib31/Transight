@@ -493,9 +493,24 @@ function App() {
             <Typography variant="h6" fontWeight={700}>{selectedStop.name}</Typography>
             <Typography variant="body2" color="text.secondary">Route 72 Stop #{selectedStop.order}</Typography>
             
-            {/* Crowd & Prediction Data */}
+            {/* LIVE Data Info */}
             {stopData && (
               <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #e5e7eb' }}>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                  LIVE DATA:
+                </Typography>
+                
+                {/* Traffic Info */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <TrafficIcon fontSize="small" color={stopData.traffic_delay > 5 ? "error" : stopData.traffic_delay > 0 ? "warning" : "success"} />
+                  <Typography variant="body2">
+                    Traffic: {stopData.current_speed > 0 ? `${stopData.current_speed} km/h` : 'No data'} 
+                    {stopData.traffic_delay > 0 && `(+${Math.round(stopData.traffic_delay)} min delay)`}
+                    {stopData.traffic_delay === 0 && '(Clear)'}
+                  </Typography>
+                </Box>
+                
+                {/* Crowd Info */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
                   <Chip 
                     icon={<PeopleIcon />}
@@ -504,16 +519,20 @@ function App() {
                     color={stopData.crowd_count > 10 ? "error" : stopData.crowd_count > 5 ? "warning" : "success"}
                     variant={stopData.is_live ? "filled" : "outlined"}
                   />
-                  {stopData.is_live && (
-                    <Typography variant="caption" color="success.main">● Live</Typography>
-                  )}
+                  <Typography variant="caption" color={stopData.is_live ? "success.main" : "text.secondary"}>
+                    {stopData.is_live ? "● Live from camera" : stopData.crowd_count > 0 ? "From database" : "No sensor data"}
+                  </Typography>
                 </Box>
                 
+                {/* Total Delay */}
                 {stopData.predicted_delay > 0 && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <TrafficIcon fontSize="small" color="warning" />
-                    <Typography variant="body2" color="warning.main">
-                      Predicted delay: +{Math.round(stopData.predicted_delay)} min
+                  <Box sx={{ mt: 1, p: 1, bgcolor: '#fff3e0', borderRadius: 1 }}>
+                    <Typography variant="body2" fontWeight={700} color="warning.dark">
+                      Total Predicted Delay: {stopData.predicted_delay.toFixed(1)} min
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      ({stopData.traffic_delay > 0 ? `Traffic: ${stopData.traffic_delay}min + ` : ''}
+                      Crowd: {(stopData.predicted_delay - stopData.traffic_delay).toFixed(1)}min)
                     </Typography>
                   </Box>
                 )}
@@ -612,7 +631,8 @@ function App() {
                   <Typography variant="h6" fontWeight={700}>Bus Details</Typography>
                 </Box>
                 
-                <Paper sx={{ p: 3, borderRadius: 3, bgcolor: '#8b5cf6', color: 'white' }}>
+                {/* Main Bus Info */}
+                <Paper sx={{ p: 3, borderRadius: 3, bgcolor: '#8b5cf6', color: 'white', mb: 2 }}>
                   <Typography variant="h3" fontWeight={800} sx={{ mb: 1 }}>72</Typography>
                   <Typography variant="h6">→ {selectedBus.destination}</Typography>
                   <Box sx={{ mt: 2, display: 'flex', gap: 3 }}>
@@ -631,7 +651,41 @@ function App() {
                   </Box>
                 </Paper>
                 
-                <Box sx={{ mt: 3 }}>
+                {/* ETA Breakdown */}
+                <Paper sx={{ p: 2, borderRadius: 2, bgcolor: '#f5f5f5', mb: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>How ETA is calculated:</Typography>
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                    <Typography variant="body2">Travel time:</Typography>
+                    <Typography variant="body2">{selectedBus.travel_time?.toFixed(1) || '?'} min</Typography>
+                  </Box>
+                  
+                  {selectedBus.predicted_delay > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="body2" color="warning.main">Predicted delay:</Typography>
+                      <Typography variant="body2" color="warning.main">+{selectedBus.predicted_delay?.toFixed(1)} min</Typography>
+                    </Box>
+                  )}
+                  
+                  <Box sx={{ borderTop: '1px solid #ddd', my: 1 }} />
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" fontWeight={700}>Total ETA:</Typography>
+                    <Typography variant="body2" fontWeight={700}>{formatTime(selectedBus.eta_minutes)}</Typography>
+                  </Box>
+                </Paper>
+                
+                {/* Data Sources */}
+                {stopData && (
+                  <Paper sx={{ p: 2, borderRadius: 2, bgcolor: '#e3f2fd', mb: 2 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">DATA SOURCES:</Typography>
+                    <Typography variant="body2">• Bus GPS: BODS API (Live)</Typography>
+                    <Typography variant="body2">• Traffic: TomTom API ({stopData.current_speed > 0 ? 'Live' : 'Fallback'})</Typography>
+                    <Typography variant="body2">• Crowd: {stopData.is_live ? 'Camera (Live)' : stopData.crowd_count > 0 ? 'Database' : 'No data (assumed 0)'}</Typography>
+                  </Paper>
+                )}
+                
+                <Box sx={{ mt: 2 }}>
                   <Typography variant="body2" color="text.secondary" align="center">
                     Last updated: {lastUpdate?.toLocaleTimeString()}
                   </Typography>
