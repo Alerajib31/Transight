@@ -286,12 +286,7 @@ def parse_siri_xml(xml_text):
                 # Check if route starts with any of our target routes
                 is_target_route = any(route.startswith(tr) for tr in TARGET_ROUTES)
                 if not is_target_route:
-                    # Debug: print skipped routes (only occasionally to avoid spam)
-                    if hash(route) % 100 == 0:
-                        print(f"  🚫 Skipping route: {route}")
-                    continue
-                else:
-                    print(f"  ✅ Found target route: {route} (bus: {bus_id}, dest: {destination})")
+                    continue  # Silently skip non-target routes
                 
                 location = journey.find('.//siri:VehicleLocation', ns)
                 if location is None:
@@ -352,7 +347,7 @@ def parse_siri_xml(xml_text):
                     if arrival_elem is not None:
                         expected_arrival = arrival_elem.text
                 
-                buses.append({
+                bus_data = {
                     "bus_id": bus_id,
                     "route": route,
                     "operator": operator,
@@ -366,8 +361,11 @@ def parse_siri_xml(xml_text):
                     "next_stop": next_stop,
                     "next_stop_ref": next_stop_ref,
                     "expected_arrival": expected_arrival,
-                })
-            except:
+                }
+                buses.append(bus_data)
+                print(f"  [BODS] Route {route} bus {bus_id} to {destination} at ({lat:.4f}, {lon:.4f})")
+            except Exception as e:
+                print(f"  [BODS] Parse error for vehicle: {e}")
                 continue
     except Exception as e:
         print(f"XML parse error: {e}")
