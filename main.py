@@ -31,7 +31,8 @@ DB_PARAMS = {
 
 # API Keys (PRESERVED - DO NOT DELETE)
 BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
-TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"  # Replace with actual TomTom API key
+TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8XiyIgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"  # Get your free API key from https://developer.tomtom.com/
+# TomTom API Key Note: The system works without a TomTom key using fallback traffic estimation
 
 # Target Routes Filter - FOCUS ONLY ON ROUTE 72
 TARGET_ROUTES = ["72"]
@@ -314,7 +315,7 @@ def save_prediction_to_db(stop_id: str, stop_name: str, crowd_count: int,
         """, (
             stop_id, crowd_count, traffic_delay, predicted_delay,
             lat, lng, 
-            "Live TomTom", 
+            "Live Traffic", 
             0.85,
             datetime.now()
         ))
@@ -324,8 +325,55 @@ def save_prediction_to_db(stop_id: str, stop_name: str, crowd_count: int,
         conn.close()
         return True
     except Exception as e:
-        print(f"Database error: {e}")
+        print(f"Database error (save): {e}")
         return False
+
+
+def get_latest_stop_data(stop_id: str):
+    """
+    Get latest crowd count and prediction for a stop from database.
+    Returns crowd_count, traffic_delay, predicted_delay or defaults if no data.
+    """
+    try:
+        conn = psycopg2.connect(**DB_PARAMS)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT crowd_count, traffic_delay, total_prediction, timestamp
+            FROM prediction_history
+            WHERE bus_stop_id = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (stop_id,))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if result:
+            crowd_count, traffic_delay, predicted_delay, timestamp = result
+            # Check if data is recent (within last 5 minutes)
+            is_recent = timestamp and (datetime.now() - timestamp).total_seconds() < 300
+            return {
+                "crowd_count": crowd_count,
+                "traffic_delay": float(traffic_delay) if traffic_delay else 0,
+                "predicted_delay": float(predicted_delay) if predicted_delay else 0,
+                "timestamp": timestamp.isoformat() if timestamp else None,
+                "is_live": is_recent,
+                "source": "sensor" if is_recent else "historical"
+            }
+    except Exception as e:
+        print(f"Database error (read): {e}")
+    
+    # Return defaults if no data or error
+    return {
+        "crowd_count": 0,
+        "traffic_delay": 0,
+        "predicted_delay": 0,
+        "timestamp": None,
+        "is_live": False,
+        "source": "default"
+    }
 
 
 # --- BODS BUS API ---
@@ -490,25 +538,29 @@ def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: fl
         return BUSES_CACHE.get("buses", {})
 
 
-def get_buses_for_stop(stop_id: str, lat: float, lon: float):
-    """Get buses approaching a specific stop with real-time positions and trail."""
+def get_buses_for_stop(stop_id: str, user_lat: float, user_lon: float):
+    """Get buses approaching a specific stop with real-time positions, trail, and predictions."""
     # Lookup stop in directory
     stop_info = None
+    sensor_id = None
     for sid, info in STOP_DIRECTORY.items():
         if sid == stop_id or info.get("atco_code") == stop_id:
-            stop_info = info
-            stop_info["sensor_id"] = sid
+            stop_info = dict(info)
+            sensor_id = sid
             break
     
     if not stop_info:
         print(f"⚠️  Stop {stop_id} not found in directory")
         return None
     
-    print(f"🔍 Looking for buses near: {stop_info['name']} ({stop_id}) at ({stop_info['lat']}, {stop_info['lng']})")
+    stop_info["sensor_id"] = sensor_id
+    print(f"🔍 Looking for buses near: {stop_info['name']} ({stop_id})")
     
-    # Fetch all buses in Greater Bristol area (covers Frenchay, Southmead, Cribbs Causeway)
-    # Bounding box: (min_lon, min_lat, max_lon, max_lat)
-    # West: -2.75, South: 51.38, East: -2.45, North: 51.55
+    # Get latest crowd data and predictions for this stop
+    stop_data = get_latest_stop_data(sensor_id or stop_id)
+    print(f"📊 Stop data: crowd={stop_data['crowd_count']}, predicted_delay={stop_data['predicted_delay']:.1f}min")
+    
+    # Fetch all buses in Greater Bristol area
     all_buses = fetch_live_buses(-2.75, 51.38, -2.45, 51.55)
     print(f"🔍 Total buses in area: {len(all_buses)}")
     
@@ -518,18 +570,27 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
         next_stop_ref = bus.get("next_stop_ref", "")
         bus_route = bus.get("route", "Unknown")
         
+        # Only show Route 72 buses
+        if bus_route != "72" and not bus_route.startswith("72-"):
+            continue
+        
         # Check if heading to this stop
         is_heading_to_stop = next_stop_ref == stop_info.get("atco_code", "")
         
         # Check distance to this stop
         dist_to_stop = haversine(stop_info["lng"], stop_info["lat"], bus["longitude"], bus["latitude"])
-        is_near_stop = dist_to_stop < 2.5  # Within 2.5km
+        is_near_stop = dist_to_stop < 3.0  # Within 3km
         
         if is_heading_to_stop or is_near_stop:
-            print(f"  🚌 Bus {bus_id} (Route {bus_route}) near stop: {dist_to_stop:.2f}km, trail points: {len(bus.get('trail', []))}")
+            print(f"  🚌 Bus {bus_id} (Route {bus_route}) near stop: {dist_to_stop:.2f}km")
             bus_copy = dict(bus)
             bus_copy["distance_to_stop"] = round(dist_to_stop, 2)
-            bus_copy["distance_to_user"] = round(haversine(lon, lat, bus["longitude"], bus["latitude"]), 2)
+            bus_copy["distance_to_user"] = round(haversine(user_lon, user_lat, bus["longitude"], bus["latitude"]), 2)
+            
+            # Calculate ETA based on distance and average speed (assume 20 km/h in city)
+            avg_speed_kmh = max(bus.get("speed", 20), 15)  # Min 15 km/h
+            eta_minutes = (dist_to_stop / avg_speed_kmh) * 60 + stop_data['predicted_delay']
+            bus_copy["eta_minutes"] = round(eta_minutes, 1)
             
             # Include trail if available
             if bus_id in BUS_HISTORY and len(BUS_HISTORY[bus_id]) > 1:
@@ -539,14 +600,15 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
             
             stop_buses.append(bus_copy)
     
-    # Sort by distance
-    stop_buses.sort(key=lambda x: x["distance_to_stop"])
+    # Sort by ETA
+    stop_buses.sort(key=lambda x: x["eta_minutes"])
     
     print(f"✅ Returning {len(stop_buses)} buses for stop {stop_id}")
     
     return {
         "stop": stop_info,
         "buses": stop_buses,
+        "stop_data": stop_data,
         "count": len(stop_buses)
     }
 
