@@ -2,89 +2,88 @@
 
 ## Project Overview
 
-Transight is an AI-powered real-time bus arrival prediction system that combines computer vision, traffic data fusion, and machine learning to provide accurate transit predictions. The system uses YOLOv8 for crowd detection at bus stops, integrates with external traffic and transit APIs (BODS, TomTom), and employs an XGBoost model to predict bus arrival times.
+Transight is an AI-powered real-time bus arrival prediction system for Bristol, UK. It combines computer vision, live transit data from the Bus Open Data Service (BODS) API, and machine learning to provide accurate bus arrival predictions. The system features an interactive React-based map interface showing real-time bus locations with GPS trails.
 
 ### Key Features
-- **Computer Vision Crowd Detection**: Uses YOLOv8 to count people waiting at bus stops
-- **Multi-Source Data Fusion**: Combines CV data with traffic conditions and live bus locations
-- **AI Prediction**: XGBoost model predicts arrival times based on crowd count, traffic, and weather
-- **Interactive Dashboard**: React-based frontend with real-time maps and predictions
-- **RESTful API**: FastAPI backend with endpoints for predictions, stops, routes, and live bus data
+- **Computer Vision Crowd Detection**: Uses YOLOv8 to count people waiting at bus stops via video analysis
+- **Real-Time Bus Tracking**: Fetches live vehicle positions from BODS API with GPS trail visualization
+- **Comprehensive Bristol Coverage**: Hardcoded database of 77 bus stops across Bristol City Region
+- **Interactive Map Interface**: Leaflet-based map with user location, stop markers, and animated bus positions
+- **ML Prediction Model**: XGBoost model trained on synthetic data to predict arrival times based on traffic, crowds, and weather
 
 ## Technology Stack
 
 ### Backend (Python)
 | Component | Technology |
 |-----------|------------|
-| Web Framework | FastAPI |
+| Web Framework | FastAPI 3.2.0 |
 | ML/DL | XGBoost, Ultralytics YOLOv8 |
-| Database | PostgreSQL (psycopg2) |
-| Data Processing | pandas, numpy |
-| External APIs | requests (BODS API, TomTom Traffic API) |
 | Computer Vision | OpenCV (cv2) |
+| Data Processing | pandas, numpy |
+| External APIs | requests (BODS API) |
 
 ### Frontend (JavaScript/React)
 | Component | Technology |
 |-----------|------------|
-| Framework | React 19 |
-| Build Tool | Vite 7 |
-| UI Components | Material-UI (MUI) v6 |
-| Maps | Leaflet + React-Leaflet |
-| HTTP Client | axios |
-| Icons | @mui/icons-material |
+| Framework | React 19.2.0 |
+| Build Tool | Vite 7.2.4 |
+| UI Components | Material-UI (MUI) v6/v7 |
+| Maps | Leaflet 1.9.4 + React-Leaflet 5.0.0 |
+| HTTP Client | axios 1.13.2 |
 
 ## Project Structure
 
 ```
 c:\Transight/
-├── main.py                  # FastAPI backend server - main entry point
-├── cv_counter.py            # Computer vision module (YOLOv8 crowd detection)
-├── run_all_cameras.py       # Multi-camera launcher for multiple bus stops
-├── train_model.py           # XGBoost model training script
-├── generate_data.py         # Synthetic training data generator
-├── camera_config.json       # Camera and bus stop configuration
-├── bus_prediction_model.json # Trained XGBoost model (binary)
-├── historical_bus_data.csv  # Training dataset
-├── yolov8n.pt              # YOLOv8 Nano model weights
-├── package.json            # Root Node.js dependencies (frontend shared)
-├── videos/                 # Video files for CV processing
-│   ├── 1.mp4              # Stop 001 video
-│   └── 2.mp4              # Stop 002 video
-├── runs/                   # YOLO training runs (auto-generated)
-└── transight-frontend/     # React frontend application
-    ├── package.json        # Frontend dependencies
-    ├── vite.config.js      # Vite build configuration
-    ├── index.html          # HTML entry point
+├── main.py                      # FastAPI backend - BODS API integration, stop database
+├── cv_counter.py                # YOLOv8 crowd detection for bus stops
+├── run_all_cameras.py           # Multi-camera launcher (subprocess orchestrator)
+├── train_model.py               # XGBoost model training script
+├── generate_data.py             # Synthetic training data generator
+├── camera_config.json           # CV system configuration
+├── bus_prediction_model.json    # Trained XGBoost model
+├── historical_bus_data.csv      # Synthetic training dataset (2000 samples)
+├── yolov8n.pt                   # YOLOv8 Nano model weights
+├── package.json                 # Root Node.js dependencies
+├── videos/                      # Video files for CV processing
+│   ├── 1.mp4
+│   └── 2.mp4
+├── runs/                        # YOLO training runs (auto-generated)
+└── transight-frontend/          # React frontend application
+    ├── package.json             # Frontend dependencies
+    ├── vite.config.js           # Vite build configuration
+    ├── eslint.config.js         # ESLint configuration
+    ├── index.html               # HTML entry point
     └── src/
-        ├── App.jsx         # Main React component
-        ├── main.jsx        # React entry point
-        ├── App.css         # Component styles
-        └── index.css       # Global styles
+        ├── App.jsx              # Main React component (614 lines)
+        ├── main.jsx             # React entry point
+        ├── index.css            # Global styles
+        └── App.css              # Component styles
 ```
 
 ## Module Descriptions
 
-### 1. Backend Modules (`*.py`)
+### Backend Modules (`*.py`)
 
 | File | Purpose |
 |------|---------|
-| `main.py` | FastAPI application with REST endpoints for predictions, stops, routes, live buses, and analytics. Contains data fusion logic. |
-| `cv_counter.py` | YOLOv8-based people detection for bus stops. Sends crowd counts to backend. Supports video files, USB cameras, and RTSP streams. |
-| `run_all_cameras.py` | Orchestrates multiple CV counter instances for different bus stops using subprocess. |
-| `train_model.py` | Trains XGBoost regression model on historical data to predict arrival times. |
-| `generate_data.py` | Generates synthetic training data simulating traffic, crowds, and weather conditions. |
+| `main.py` | FastAPI application with REST endpoints. Contains BRISTOL_STOPS database (77 stops), BODS API integration with SIRI-XML parsing, bus location caching, and haversine distance calculations. |
+| `cv_counter.py` | YOLOv8-based person detection for bus stops. Processes video files, filters detections by ROI (excludes right 40% of frame), sends crowd counts to backend every 5 seconds. |
+| `run_all_cameras.py` | Orchestrates multiple CV counter instances using subprocess. Configured for STOP_001/STOP_002 with videos 1.mp4/2.mp4. |
+| `train_model.py` | Trains XGBoost regressor on historical_bus_data.csv. Features: traffic_delay, crowd_count, is_raining. Target: actual_arrival_time. |
+| `generate_data.py` | Generates 2000 synthetic samples using formula: actual_arrival = traffic + (crowd * 4s / 60) + rain_penalty(2min) + noise. |
 
-### 2. Frontend Modules (`transight-frontend/src/`)
+### Frontend Modules (`transight-frontend/src/`)
 
 | File | Purpose |
 |------|---------|
-| `App.jsx` | Main UI component with map visualization, prediction cards, stop selector, and live bus tracking. Responsive design for mobile/desktop. |
-| `main.jsx` | React application bootstrap |
+| `App.jsx` | Main UI component with three view modes: 'stops' (map with all stops), 'bus-list' (bottom sheet with approaching buses), 'bus-detail' (live bus tracking with GPS trail). Implements draggable bottom sheet, search, and real-time updates every 10 seconds. |
+| `main.jsx` | React 19 bootstrap with createRoot. |
+| `index.css` | Global styles with CSS variables, dark/light mode support, full-height layout. |
 
 ## Configuration Files
 
 ### `camera_config.json`
-Defines system settings and bus stop configurations:
 ```json
 {
   "system": {
@@ -93,59 +92,28 @@ Defines system settings and bus stop configurations:
     "frame_skip": 2,
     "display_width": 800
   },
-  "bus_stops": [
-    {
-      "stop_id": "STOP_001",
-      "name": "Downtown Station",
-      "route_ids": [10, 15, 22],
-      "latitude": 51.4496,
-      "longitude": -2.5811,
-      "camera": {
-        "type": "video",      // Options: "video", "usb", "rtsp"
-        "source": "1.mp4",    // Video file, camera index, or RTSP URL
-        "roi_boundary": 0.6   // Region of interest (exclude bus area)
-      }
-    }
-  ]
+  "bus_stops": [],
+  "notes": "Bus stops are now loaded dynamically from BODS API"
 }
 ```
 
-### Database Schema (PostgreSQL)
-### API Endpoints (v2.0)
+### API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check and system status |
-| `/stops` | GET | List all bus stops (optionally filter by lat/lon/radius) |
-| `/stops/{stop_id}` | GET | Get specific stop with upcoming buses |
-| `/nearby-stops` | GET | Find stops near coordinates |
-| `/search` | GET | Search stops by name |
-| `/live-buses` | GET | Get live bus locations (optionally filter by location) |
-| `/live-buses/route/{route_id}` | GET | Get buses for specific route |
-| `/routes/nearby` | GET | Get active routes near user |
-| `/predict/{stop_id}` | GET | Get arrival prediction for stop |
-| `/analytics/{stop_id}` | GET | Historical analytics |
-| `/update-sensor-data` | POST | Receive CV crowd count data |
-
-### Database Schema (PostgreSQL)
-Table: `prediction_history`
-- `bus_stop_id` (TEXT): Stop identifier (BODS atco_code)
-- `crowd_count` (INTEGER): People detected
-- `traffic_delay` (FLOAT): Traffic delay in minutes
-- `dwell_delay` (FLOAT): Boarding time estimate
-- `total_prediction` (FLOAT): Final arrival prediction
-- `bus_lat`, `bus_lon` (FLOAT): Bus location
-- `traffic_status` (TEXT): Free Flow / Moderate / Congested
-- `confidence` (FLOAT): Prediction confidence 0-1
-- `timestamp` (TIMESTAMP): Record time
+| `/health` | GET | Health check with stops count and tracked buses |
+| `/stops` | GET | List all 77 Bristol stops (optionally filter by lat/lon/radius) |
+| `/nearby-stops` | GET | Find stops near coordinates (default 10km radius) |
+| `/stop/{stop_id}/buses` | GET | Get buses approaching a specific stop with real-time positions and trail |
+| `/search-stops` | GET | Search stops by name/locality (returns max 20 results) |
+| `/all-buses` | GET | Get all buses in Bristol area with distance calculations |
 
 ## Build and Run Commands
 
 ### Prerequisites
 - Python 3.8+
 - Node.js 18+
-- PostgreSQL database
-- API Keys: BODS_API_KEY, TomTom_API_KEY (hardcoded in main.py)
+- Video files in `/videos/` directory (for CV module)
 
 ### Backend Setup
 ```bash
@@ -171,7 +139,7 @@ cd transight-frontend
 # Install dependencies
 npm install
 
-# Development server
+# Development server (Vite dev server with HMR)
 npm run dev
 
 # Production build
@@ -187,71 +155,67 @@ npm run lint
 ### Computer Vision (CV Counter)
 ```bash
 # Single camera/stop
-python cv_counter.py --stop-id STOP_001 --video 1.mp4
+python cv_counter.py --stop-id 01000053220 --video 1.mp4
 
 # Multiple cameras
 python run_all_cameras.py
 ```
 
-## API Endpoints
+## Data Flow
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check and system status |
-| `/stops` | GET | List all bus stops |
-| `/stops/{stop_id}` | GET | Get specific stop details |
-| `/routes/nearby` | GET | Get routes near user location |
-| `/live-buses/route/{route_id}` | GET | Get buses for specific route |
-| `/search` | GET | Search stops by name |
-| `/predict/{stop_id}` | GET | Get arrival prediction for stop |
-| `/live-buses` | GET | Get live bus locations from BODS |
-| `/live-buses/{route_id}` | GET | Get buses for specific route |
-| `/nearby-stops` | GET | Find stops near coordinates |
-| `/analytics/{stop_id}` | GET | Historical analytics |
-| `/update-sensor-data` | POST | Receive CV crowd count data |
+1. **CV Counter** detects people → Sends `crowd_count` to `/update-sensor-data` every 5 seconds
+2. **Backend** fetches live bus data from BODS API (cached 30s) via SIRI-XML parsing
+3. **Backend** maintains 77 Bristol stops in memory (BRISTOL_STOPS list)
+4. **Frontend** polls `/stop/{stop_id}/buses` every 10 seconds for real-time updates
+5. **Frontend** displays bus locations with GPS trail (last 20 positions) on Leaflet map
 
-## Development Conventions
-
-### Code Style
-- **Python**: Follow PEP 8, use type hints where applicable
-- **JavaScript/React**: Uses ESLint with React hooks and refresh plugins
-- **Comments**: Use emoji indicators for status: ✅ ✓ ⚠️ ❌ 🟢 🔴
+## Code Conventions
 
 ### Naming Conventions
-- Python: `snake_case` for functions/variables, `PascalCase` for classes
-- JavaScript: `camelCase` for variables/functions, `PascalCase` for components
-- Bus Stop IDs: `STOP_XXX` format
-- Route IDs: Numeric strings (e.g., "72", "10")
+- **Python**: `snake_case` for functions/variables, `PascalCase` for classes
+- **JavaScript**: `camelCase` for variables/functions, `PascalCase` for components
+- **Stop IDs**: ATCO format (e.g., "01000053220" for Temple Meads Station)
+- **Route IDs**: Numeric strings (e.g., "72", "10")
 
-### Data Flow
-1. CV Counter detects people → Sends `crowd_count` to `/update-sensor-data`
-2. Backend fetches traffic data from TomTom API
-3. Backend fetches live bus data from BODS API (cached 30s)
-4. XGBoost model predicts delay based on crowd + traffic
-5. Frontend polls `/predict/{stop_id}` every 10 seconds
-6. Frontend displays prediction with map visualization
+### Code Style
+- **Python**: Comments use emoji indicators for status: ✅ ✓ ⚠️ ❌ 🟢 🔴
+- **JavaScript/React**: Uses ESLint with React hooks and refresh plugins
+- **Type Hints**: Used in Python where applicable
+
+### Key Implementation Details
+
+1. **Bristol Stops Database**: Hardcoded list of 77 stops with atco_code, common_name, locality, indicator, latitude, longitude. Covers City Centre, East Bristol, North Bristol, Clifton/Hotwells, South Bristol.
+
+2. **Bus Trail Visualization**: Backend maintains BUS_HISTORY dictionary with last 20 GPS positions per bus. Frontend renders as thick blue Polyline on Leaflet map.
+
+3. **ROI Filtering**: cv_counter.py excludes detections in right 40% of frame (x > 0.6 * width) to avoid counting people on the bus.
+
+4. **Distance Calculation**: Haversine formula for accurate km distances between GPS coordinates.
 
 ## Testing Strategy
 
 Currently, the project has **no automated tests**. Testing is done manually:
 
-1. **Backend Testing**: Use `/docs` endpoint (Swagger UI) for API testing
+1. **Backend Testing**: Use `/docs` endpoint (Swagger UI) for API testing at `http://localhost:8000/docs`
 2. **Frontend Testing**: Manual browser testing, responsive design verification
-3. **CV Testing**: Run with sample videos, verify detection accuracy
+3. **CV Testing**: Run with sample videos, verify detection accuracy with visual overlay
 
 ### Mock Data
-- Frontend includes mock bus data for when BODS API fails
-- `generate_data.py` creates synthetic training data
+- Frontend includes fallback user location (51.4545, -2.5879) if geolocation denied
+- `generate_data.py` creates synthetic training data with realistic distributions
 
-## Deployment Considerations
+## Security Considerations
 
-### Security Notes (Hardcoded Credentials)
-⚠️ **WARNING**: The following sensitive data is hardcoded in `main.py`:
-- Database credentials: `DB_PARAMS` (host: localhost, db: transight_db, user: postgres)
-- API Keys: `BODS_API_KEY`, `TOMTOM_API_KEY`
-- These should be moved to environment variables for production
+⚠️ **WARNING**: Hardcoded credentials in `main.py`:
+```python
+DB_PARAMS = {
+    "host": "localhost", "database": "transight_db", 
+    "user": "postgres", "password": "R@jibale3138"
+}
+BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
+```
 
-### Environment Variables (Recommended)
+These should be moved to environment variables for production:
 ```bash
 # Database
 DB_HOST=localhost
@@ -261,41 +225,30 @@ DB_PASSWORD=your_password
 
 # API Keys
 BODS_API_KEY=your_key
-TOMTOM_API_KEY=your_key
-
-# Backend
-BACKEND_URL=http://localhost:8000
-```
-
-### Production Build
-```bash
-# Frontend
-cd transight-frontend
-npm run build
-# Output: transight-frontend/dist/
-
-# Backend (use production server)
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ## External Dependencies
 
 ### APIs
-- **BODS API**: Bus Open Data Service (UK) - Live vehicle positions
-- **TomTom Traffic API**: Real-time traffic flow data
+- **BODS API**: Bus Open Data Service (UK) - Live vehicle positions via SIRI-VM XML format
 - **OpenStreetMap**: Map tiles for frontend
 
-### ML Model
-- **YOLOv8 Nano**: Pre-trained on COCO dataset for person detection
+### ML Models
+- **YOLOv8 Nano**: Pre-trained on COCO dataset for person detection (class 0)
 - **XGBoost**: Trained on synthetic data for arrival prediction
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| CV Counter lag | Adjust `FRAME_SKIP` in config (higher = less lag) |
-| Backend connection failed | Verify backend running on port 8000, check CORS |
-| Database errors | Ensure PostgreSQL running, credentials correct |
-| BODS API fails | Check API key, uses cached data as fallback |
+| CV Counter lag | Adjust `FRAME_SKIP` in config (higher = less lag, default: 2) |
+| Backend connection failed | Verify backend running on port 8000, check CORS settings |
 | Video not found | Place videos in `/videos/` directory or specify full path |
-| Geolocation denied | Frontend shows error, does not fall back to default |
+| Geolocation denied | Frontend falls back to Bristol city centre coordinates |
+| BODS API fails | Check API key; backend uses cached data as fallback |
+| Build errors | Ensure Node.js 18+ and Python 3.8+ installed |
+
+## Version History
+
+- **v3.2.0** (Current): Comprehensive Bristol stops database (77 stops), real-time bus tracking with GPS trails, draggable bottom sheet UI
+- Previous versions included TomTom Traffic API integration (removed in current version)
