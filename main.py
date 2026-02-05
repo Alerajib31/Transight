@@ -16,19 +16,51 @@ from math import radians, cos, sin, asin, sqrt
 # --- CONFIGURATION ---
 app = FastAPI(
     title="Transight Transit API",
-    description="Real-time bus tracking system - Final Year Project",
-    version="3.2.0"
+    description="Real-time bus tracking with Modular ID System",
+    version="4.0.0"
 )
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
+# Database Configuration
 DB_PARAMS = {
     "host": "localhost", "database": "transight_db", "user": "postgres", "password": "R@jibale3138"
 }
 
+# API Keys (PRESERVED - DO NOT DELETE)
 BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
+TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"  # Replace with actual TomTom API key
+
+# Target Routes Filter
+TARGET_ROUTES = ["72", "76"]
+
+# ==========================================
+# MODULAR STOP DIRECTORY (The "Registry")
+# ==========================================
+# Easy to add new stops - just add a new entry here
+STOP_DIRECTORY = {
+    "BST-001": {
+        "name": "Temple Meads",
+        "lat": 51.4496,
+        "lng": -2.5811,
+        "atco_code": "01000053220"
+    },
+    "BST-002": {
+        "name": "Cabot Circus",
+        "lat": 51.4545,
+        "lng": -2.5879,
+        "atco_code": "01000588088"
+    },
+    "BST-003": {
+        "name": "Clifton Down",
+        "lat": 51.4645,
+        "lng": -2.6098,
+        "atco_code": "01000058001"
+    },
+    # Future stops can be added here easily following the same pattern
+}
 
 # Cache
 STOPS_CACHE = {"data": None, "timestamp": 0}
@@ -36,133 +68,18 @@ STOPS_CACHE_EXPIRY = 600  # 10 minutes
 BUSES_CACHE = {"buses": {}, "timestamp": 0}
 BUS_HISTORY = {}
 
-# ==========================================
-# COMPREHENSIVE BRISTOL BUS STOPS DATABASE
-# ==========================================
-# Based on Bristol's major bus corridors and key areas
-BRISTOL_STOPS = [
-    # City Centre - Core area
-    {"atco_code": "01000588088", "common_name": "Cabot Circus", "locality": "Bristol City Centre", "indicator": "Stop A", "latitude": 51.4545, "longitude": -2.5879},
-    {"atco_code": "01000588089", "common_name": "Cabot Circus", "locality": "Bristol City Centre", "indicator": "Stop B", "latitude": 51.4547, "longitude": -2.5882},
-    {"atco_code": "01000001008", "common_name": "St Nicholas Market", "locality": "Bristol City Centre", "indicator": "Stop A", "latitude": 51.4510, "longitude": -2.5880},
-    {"atco_code": "01000001009", "common_name": "St Nicholas Market", "locality": "Bristol City Centre", "indicator": "Stop B", "latitude": 51.4512, "longitude": -2.5885},
-    {"atco_code": "01000053304", "common_name": "Broadmead", "locality": "Bristol", "indicator": "H4", "latitude": 51.4580, "longitude": -2.5905},
-    {"atco_code": "01000053305", "common_name": "Broadmead", "locality": "Bristol", "indicator": "H5", "latitude": 51.4582, "longitude": -2.5908},
-    {"atco_code": "01000053220", "common_name": "Temple Meads Station", "locality": "Bristol", "indicator": "T4", "latitude": 51.4496, "longitude": -2.5811},
-    {"atco_code": "01000053221", "common_name": "Temple Meads Station", "locality": "Bristol", "indicator": "T5", "latitude": 51.4498, "longitude": -2.5815},
-    {"atco_code": "01000054001", "common_name": "Bedminster Parade", "locality": "Bristol", "indicator": "BE", "latitude": 51.4420, "longitude": -2.5945},
-    {"atco_code": "01000054002", "common_name": "Bedminster Parade", "locality": "Bristol", "indicator": "BF", "latitude": 51.4422, "longitude": -2.5948},
-    {"atco_code": "01000058001", "common_name": "Clifton Down", "locality": "Bristol", "indicator": "CD1", "latitude": 51.4645, "longitude": -2.6098},
-    {"atco_code": "01000058002", "common_name": "Clifton Down", "locality": "Bristol", "indicator": "CD2", "latitude": 51.4647, "longitude": -2.6102},
-    {"atco_code": "01000055001", "common_name": "Southmead Hospital", "locality": "Bristol", "indicator": "SM1", "latitude": 51.4950, "longitude": -2.5950},
-    {"atco_code": "01000055002", "common_name": "Southmead Hospital", "locality": "Bristol", "indicator": "SM2", "latitude": 51.4952, "longitude": -2.5955},
-    {"atco_code": "01000056001", "common_name": "Bristol Parkway Station", "locality": "Stoke Gifford", "indicator": "P1", "latitude": 51.5135, "longitude": -2.5420},
-    {"atco_code": "01000056002", "common_name": "Bristol Parkway Station", "locality": "Stoke Gifford", "indicator": "P2", "latitude": 51.5137, "longitude": -2.5425},
-    {"atco_code": "01000057001", "common_name": "UWE Frenchay", "locality": "Bristol", "indicator": "U1", "latitude": 51.5005, "longitude": -2.5490},
-    {"atco_code": "01000057002", "common_name": "UWE Frenchay", "locality": "Bristol", "indicator": "U2", "latitude": 51.5007, "longitude": -2.5495},
-    
-    # Additional City Centre stops
-    {"atco_code": "01000002301", "common_name": "The Centre", "locality": "Bristol", "indicator": "C1", "latitude": 51.4528, "longitude": -2.5975},
-    {"atco_code": "01000002302", "common_name": "The Centre", "locality": "Bristol", "indicator": "C2", "latitude": 51.4530, "longitude": -2.5978},
-    {"atco_code": "01000004501", "common_name": "College Green", "locality": "Bristol", "indicator": "CG1", "latitude": 51.4520, "longitude": -2.6015},
-    {"atco_code": "01000004502", "common_name": "College Green", "locality": "Bristol", "indicator": "CG2", "latitude": 51.4522, "longitude": -2.6018},
-    {"atco_code": "01000006701", "common_name": "Park Street", "locality": "Bristol", "indicator": "PS1", "latitude": 51.4545, "longitude": -2.6025},
-    {"atco_code": "01000006702", "common_name": "Park Street", "locality": "Bristol", "indicator": "PS2", "latitude": 51.4547, "longitude": -2.6028},
-    {"atco_code": "01000008901", "common_name": "Broad Quay", "locality": "Bristol", "indicator": "BQ1", "latitude": 51.4515, "longitude": -2.5950},
-    {"atco_code": "01000008902", "common_name": "Broad Quay", "locality": "Bristol", "indicator": "BQ2", "latitude": 51.4517, "longitude": -2.5953},
-    {"atco_code": "01000010101", "common_name": "Old Market", "locality": "Bristol", "indicator": "OM1", "latitude": 51.4555, "longitude": -2.5830},
-    {"atco_code": "01000010102", "common_name": "Old Market", "locality": "Bristol", "indicator": "OM2", "latitude": 51.4557, "longitude": -2.5833},
-    {"atco_code": "01000011201", "common_name": "Rupert Street", "locality": "Bristol", "indicator": "RS1", "latitude": 51.4560, "longitude": -2.5920},
-    {"atco_code": "01000011202", "common_name": "Rupert Street", "locality": "Bristol", "indicator": "RS2", "latitude": 51.4562, "longitude": -2.5923},
-    {"atco_code": "01000013401", "common_name": "Baldwin Street", "locality": "Bristol", "indicator": "BS1", "latitude": 51.4535, "longitude": -2.5930},
-    {"atco_code": "01000013402", "common_name": "Baldwin Street", "locality": "Bristol", "indicator": "BS2", "latitude": 51.4537, "longitude": -2.5933},
-    {"atco_code": "01000015601", "common_name": "Victoria Street", "locality": "Bristol", "indicator": "VS1", "latitude": 51.4520, "longitude": -2.5800},
-    {"atco_code": "01000015602", "common_name": "Victoria Street", "locality": "Bristol", "indicator": "VS2", "latitude": 51.4522, "longitude": -2.5803},
-    {"atco_code": "01000017801", "common_name": "Temple Way", "locality": "Bristol", "indicator": "TW1", "latitude": 51.4480, "longitude": -2.5820},
-    {"atco_code": "01000017802", "common_name": "Temple Way", "locality": "Bristol", "indicator": "TW2", "latitude": 51.4482, "longitude": -2.5823},
-    
-    # Redcliffe / South Bristol
-    {"atco_code": "01000018901", "common_name": "Redcliffe Bridge", "locality": "Bristol", "indicator": "RB1", "latitude": 51.4495, "longitude": -2.5870},
-    {"atco_code": "01000018902", "common_name": "Redcliffe Bridge", "locality": "Bristol", "indicator": "RB2", "latitude": 51.4497, "longitude": -2.5873},
-    {"atco_code": "01000020101", "common_name": "Coronation Road", "locality": "Bristol", "indicator": "CR1", "latitude": 51.4435, "longitude": -2.6000},
-    {"atco_code": "01000020102", "common_name": "Coronation Road", "locality": "Bristol", "indicator": "CR2", "latitude": 51.4437, "longitude": -2.6003},
-    {"atco_code": "01000022301", "common_name": "Bedminster Down", "locality": "Bristol", "indicator": "BD1", "latitude": 51.4380, "longitude": -2.6050},
-    {"atco_code": "01000022302", "common_name": "Bedminster Down", "locality": "Bristol", "indicator": "BD2", "latitude": 51.4382, "longitude": -2.6053},
-    {"atco_code": "01000024501", "common_name": "Hartcliffe", "locality": "Bristol", "indicator": "HC1", "latitude": 51.4300, "longitude": -2.6100},
-    {"atco_code": "01000024502", "common_name": "Hartcliffe", "locality": "Bristol", "indicator": "HC2", "latitude": 51.4302, "longitude": -2.6103},
-    {"atco_code": "01000026701", "common_name": "Withywood", "locality": "Bristol", "indicator": "WW1", "latitude": 51.4250, "longitude": -2.6150},
-    {"atco_code": "01000026702", "common_name": "Withywood", "locality": "Bristol", "indicator": "WW2", "latitude": 51.4252, "longitude": -2.6153},
-    {"atco_code": "01000028901", "common_name": "Bishopsworth", "locality": "Bristol", "indicator": "BW1", "latitude": 51.4180, "longitude": -2.6200},
-    {"atco_code": "01000028902", "common_name": "Bishopsworth", "locality": "Bristol", "indicator": "BW2", "latitude": 51.4182, "longitude": -2.6203},
-    
-    # East Bristol
-    {"atco_code": "01000030101", "common_name": "Lawrence Hill", "locality": "Bristol", "indicator": "LH1", "latitude": 51.4600, "longitude": -2.5750},
-    {"atco_code": "01000030102", "common_name": "Lawrence Hill", "locality": "Bristol", "indicator": "LH2", "latitude": 51.4602, "longitude": -2.5753},
-    {"atco_code": "01000032301", "common_name": "Easton", "locality": "Bristol", "indicator": "EA1", "latitude": 51.4620, "longitude": -2.5700},
-    {"atco_code": "01000032302", "common_name": "Easton", "locality": "Bristol", "indicator": "EA2", "latitude": 51.4622, "longitude": -2.5703},
-    {"atco_code": "01000034501", "common_name": "Stapleton Road", "locality": "Bristol", "indicator": "SR1", "latitude": 51.4650, "longitude": -2.5650},
-    {"atco_code": "01000034502", "common_name": "Stapleton Road", "locality": "Bristol", "indicator": "SR2", "latitude": 51.4652, "longitude": -2.5653},
-    {"atco_code": "01000036701", "common_name": "Fishponds", "locality": "Bristol", "indicator": "FP1", "latitude": 51.4800, "longitude": -2.5350},
-    {"atco_code": "01000036702", "common_name": "Fishponds", "locality": "Bristol", "indicator": "FP2", "latitude": 51.4802, "longitude": -2.5353},
-    {"atco_code": "01000038901", "common_name": "Staple Hill", "locality": "Bristol", "indicator": "SH1", "latitude": 51.4850, "longitude": -2.5250},
-    {"atco_code": "01000038902", "common_name": "Staple Hill", "locality": "Bristol", "indicator": "SH2", "latitude": 51.4852, "longitude": -2.5253},
-    {"atco_code": "01000040101", "common_name": "Kingswood", "locality": "Bristol", "indicator": "KW1", "latitude": 51.4900, "longitude": -2.5150},
-    {"atco_code": "01000040102", "common_name": "Kingswood", "locality": "Bristol", "indicator": "KW2", "latitude": 51.4902, "longitude": -2.5153},
-    {"atco_code": "01000042301", "common_name": "Hanham", "locality": "Bristol", "indicator": "HM1", "latitude": 51.4450, "longitude": -2.5100},
-    {"atco_code": "01000042302", "common_name": "Hanham", "locality": "Bristol", "indicator": "HM2", "latitude": 51.4452, "longitude": -2.5103},
-    {"atco_code": "01000044501", "common_name": "Longwell Green", "locality": "Bristol", "indicator": "LG1", "latitude": 51.4500, "longitude": -2.5000},
-    {"atco_code": "01000044502", "common_name": "Longwell Green", "locality": "Bristol", "indicator": "LG2", "latitude": 51.4502, "longitude": -2.5003},
-    
-    # North Bristol
-    {"atco_code": "01000046701", "common_name": "Horfield", "locality": "Bristol", "indicator": "HF1", "latitude": 51.4900, "longitude": -2.5800},
-    {"atco_code": "01000046702", "common_name": "Horfield", "locality": "Bristol", "indicator": "HF2", "latitude": 51.4902, "longitude": -2.5803},
-    {"atco_code": "01000048901", "common_name": "Filton", "locality": "Bristol", "indicator": "FI1", "latitude": 51.5000, "longitude": -2.5700},
-    {"atco_code": "01000048902", "common_name": "Filton", "locality": "Bristol", "indicator": "FI2", "latitude": 51.5002, "longitude": -2.5703},
-    {"atco_code": "01000050101", "common_name": "Patchway", "locality": "Bristol", "indicator": "PA1", "latitude": 51.5250, "longitude": -2.5600},
-    {"atco_code": "01000050102", "common_name": "Patchway", "locality": "Bristol", "indicator": "PA2", "latitude": 51.5252, "longitude": -2.5603},
-    {"atco_code": "01000052301", "common_name": "Cribbs Causeway", "locality": "Bristol", "indicator": "CC1", "latitude": 51.5250, "longitude": -2.6100},
-    {"atco_code": "01000052302", "common_name": "Cribbs Causeway", "locality": "Bristol", "indicator": "CC2", "latitude": 51.5252, "longitude": -2.6103},
-    {"atco_code": "01000054501", "common_name": "Henbury", "locality": "Bristol", "indicator": "HE1", "latitude": 51.5100, "longitude": -2.6200},
-    {"atco_code": "01000054502", "common_name": "Henbury", "locality": "Bristol", "indicator": "HE2", "latitude": 51.5102, "longitude": -2.6203},
-    {"atco_code": "01000056701", "common_name": "Westbury-on-Trym", "locality": "Bristol", "indicator": "WT1", "latitude": 51.4950, "longitude": -2.6250},
-    {"atco_code": "01000056702", "common_name": "Westbury-on-Trym", "locality": "Bristol", "indicator": "WT2", "latitude": 51.4952, "longitude": -2.6253},
-    {"atco_code": "01000058901", "common_name": "Henleaze", "locality": "Bristol", "indicator": "HZ1", "latitude": 51.4900, "longitude": -2.6150},
-    {"atco_code": "01000058902", "common_name": "Henleaze", "locality": "Bristol", "indicator": "HZ2", "latitude": 51.4902, "longitude": -2.6153},
-    
-    # Clifton / Hotwells
-    {"atco_code": "01000060101", "common_name": "Clifton Village", "locality": "Bristol", "indicator": "CV1", "latitude": 51.4550, "longitude": -2.6200},
-    {"atco_code": "01000060102", "common_name": "Clifton Village", "locality": "Bristol", "indicator": "CV2", "latitude": 51.4552, "longitude": -2.6203},
-    {"atco_code": "01000062301", "common_name": "Clifton Suspension Bridge", "locality": "Bristol", "indicator": "SB1", "latitude": 51.4540, "longitude": -2.6280},
-    {"atco_code": "01000062302", "common_name": "Clifton Suspension Bridge", "locality": "Bristol", "indicator": "SB2", "latitude": 51.4542, "longitude": -2.6283},
-    {"atco_code": "01000064501", "common_name": "Hotwells", "locality": "Bristol", "indicator": "HW1", "latitude": 51.4500, "longitude": -2.6150},
-    {"atco_code": "01000064502", "common_name": "Hotwells", "locality": "Bristol", "indicator": "HW2", "latitude": 51.4502, "longitude": -2.6153},
-    {"atco_code": "01000066701", "common_name": "Cumberland Basin", "locality": "Bristol", "indicator": "CB1", "latitude": 51.4450, "longitude": -2.6180},
-    {"atco_code": "01000066702", "common_name": "Cumberland Basin", "locality": "Bristol", "indicator": "CB2", "latitude": 51.4452, "longitude": -2.6183},
-    
-    # Key residential areas
-    {"atco_code": "01000068901", "common_name": "Knowle", "locality": "Bristol", "indicator": "KN1", "latitude": 51.4350, "longitude": -2.5900},
-    {"atco_code": "01000068902", "common_name": "Knowle", "locality": "Bristol", "indicator": "KN2", "latitude": 51.4352, "longitude": -2.5903},
-    {"atco_code": "01000070101", "common_name": "Brislington", "locality": "Bristol", "indicator": "BR1", "latitude": 51.4400, "longitude": -2.5450},
-    {"atco_code": "01000070102", "common_name": "Brislington", "locality": "Bristol", "indicator": "BR2", "latitude": 51.4402, "longitude": -2.5453},
-    {"atco_code": "01000072301", "common_name": "Whitchurch", "locality": "Bristol", "indicator": "WC1", "latitude": 51.4200, "longitude": -2.5700},
-    {"atco_code": "01000072302", "common_name": "Whitchurch", "locality": "Bristol", "indicator": "WC2", "latitude": 51.4202, "longitude": -2.5703},
-    {"atco_code": "01000074501", "common_name": "Hengrove", "locality": "Bristol", "indicator": "HG1", "latitude": 51.4150, "longitude": -2.5850},
-    {"atco_code": "01000074502", "common_name": "Hengrove", "locality": "Bristol", "indicator": "HG2", "latitude": 51.4152, "longitude": -2.5853},
-    {"atco_code": "01000076701", "common_name": "Stockwood", "locality": "Bristol", "indicator": "SK1", "latitude": 51.4100, "longitude": -2.5350},
-    {"atco_code": "01000076702", "common_name": "Stockwood", "locality": "Bristol", "indicator": "SK2", "latitude": 51.4102, "longitude": -2.5353},
-    {"atco_code": "01000078901", "common_name": "Keynsham", "locality": "Bristol", "indicator": "KY1", "latitude": 51.4150, "longitude": -2.4950},
-    {"atco_code": "01000078902", "common_name": "Keynsham", "locality": "Bristol", "indicator": "KY2", "latitude": 51.4152, "longitude": -2.4953},
-]
-
 # Load AI model
 model_path = "bus_prediction_model.json"
 bst = None
 if os.path.exists(model_path):
     bst = xgb.Booster()
     bst.load_model(model_path)
+    print(f"✅ ML Model loaded: {model_path}")
 
 # --- HELPER FUNCTIONS ---
+
 def haversine(lon1, lat1, lon2, lat2):
+    """Calculate distance in km between two coordinates."""
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
     dlat = lat2 - lat1
@@ -170,31 +87,134 @@ def haversine(lon1, lat1, lon2, lat2):
     c = 2 * asin(sqrt(a))
     return 6371 * c
 
-def get_all_bristol_stops():
-    """Return all Bristol stops"""
-    return BRISTOL_STOPS
 
-def get_stops_near_location(lat: float, lon: float, radius: float = 10.0) -> List[dict]:
-    """Get stops within radius - returns ALL if radius is large enough"""
-    all_stops = get_all_bristol_stops()
+def get_tomtom_traffic(lat: float, lng: float):
+    """
+    Fetch real-time traffic data from TomTom API.
+    Returns traffic delay in minutes and current speed.
+    """
+    try:
+        # TomTom Flow Segment Data API
+        url = f"https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+        params = {
+            "key": TOMTOM_API_KEY,
+            "point": f"{lat},{lng}"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            flow = data.get("flowSegmentData", {})
+            
+            current_speed = flow.get("currentSpeed", 0)
+            free_flow_speed = flow.get("freeFlowSpeed", 0)
+            
+            # Calculate delay: if current_speed is significantly lower than free_flow_speed
+            if free_flow_speed > 0 and current_speed > 0:
+                speed_ratio = current_speed / free_flow_speed
+                if speed_ratio < 0.5:
+                    # Heavy traffic - estimate 10-20 min delay
+                    delay_min = round((1 - speed_ratio) * 20, 1)
+                elif speed_ratio < 0.8:
+                    # Moderate traffic - estimate 5-10 min delay
+                    delay_min = round((1 - speed_ratio) * 15, 1)
+                else:
+                    # Light traffic
+                    delay_min = 0
+            else:
+                delay_min = 0
+                
+            return {
+                "traffic_delay_min": delay_min,
+                "current_speed_kph": current_speed,
+                "free_flow_speed_kph": free_flow_speed,
+                "congestion_level": flow.get("confidence", 0),
+                "status": "success"
+            }
+        else:
+            print(f"TomTom API error: {response.status_code}")
+            return {
+                "traffic_delay_min": 0,
+                "current_speed_kph": 0,
+                "free_flow_speed_kph": 0,
+                "congestion_level": 0,
+                "status": f"api_error_{response.status_code}"
+            }
+    except Exception as e:
+        print(f"TomTom fetch error: {e}")
+        return {
+            "traffic_delay_min": 0,
+            "current_speed_kph": 0,
+            "free_flow_speed_kph": 0,
+            "congestion_level": 0,
+            "status": "error"
+        }
+
+
+def predict_arrival_delay(traffic_delay: float, crowd_count: int, is_raining: bool = False):
+    """
+    Use XGBoost model to predict arrival delay.
+    Features: traffic_delay, crowd_count, is_raining
+    """
+    if bst is None:
+        # Fallback calculation if model not available
+        crowd_delay = (crowd_count * 4) / 60  # 4 seconds per person
+        rain_delay = 2 if is_raining else 0
+        return traffic_delay + crowd_delay + rain_delay
     
-    nearby = []
-    for stop in all_stops:
-        try:
-            dist = haversine(lon, lat, stop["longitude"], stop["latitude"])
-            if dist <= radius:
-                stop_copy = dict(stop)
-                stop_copy["distance_km"] = round(dist, 2)
-                nearby.append(stop_copy)
-        except:
-            continue
-    
-    nearby.sort(key=lambda x: x.get("distance_km", 999))
-    return nearby
+    try:
+        # Prepare features for model
+        features = pd.DataFrame([{
+            "traffic_delay": traffic_delay,
+            "crowd_count": crowd_count,
+            "is_raining": int(is_raining)
+        }])
+        
+        dmatrix = xgb.DMatrix(features)
+        prediction = bst.predict(dmatrix)[0]
+        return round(float(prediction), 2)
+    except Exception as e:
+        print(f"Prediction error: {e}")
+        # Fallback
+        crowd_delay = (crowd_count * 4) / 60
+        return traffic_delay + crowd_delay
+
+
+def save_prediction_to_db(stop_id: str, stop_name: str, crowd_count: int, 
+                          traffic_delay: float, predicted_delay: float, 
+                          lat: float, lng: float):
+    """Save prediction record to database."""
+    try:
+        conn = psycopg2.connect(**DB_PARAMS)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO prediction_history 
+            (bus_stop_id, crowd_count, traffic_delay, total_prediction, 
+             bus_lat, bus_lon, traffic_status, confidence, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            stop_id, crowd_count, traffic_delay, predicted_delay,
+            lat, lng, 
+            "Live TomTom", 
+            0.85,
+            datetime.now()
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Database error: {e}")
+        return False
+
 
 # --- BODS BUS API ---
 
 def parse_siri_xml(xml_text):
+    """Parse SIRI-VM XML from BODS API."""
     buses = []
     try:
         root = ET.fromstring(xml_text)
@@ -204,6 +224,16 @@ def parse_siri_xml(xml_text):
             try:
                 journey = vehicle.find('.//siri:MonitoredVehicleJourney', ns)
                 if journey is None:
+                    continue
+                
+                # Get route number
+                route_elem = journey.find('siri:PublishedLineName', ns)
+                if route_elem is None:
+                    route_elem = journey.find('siri:LineRef', ns)
+                route = route_elem.text if route_elem is not None else "Unknown"
+                
+                # FILTER: Only keep target routes (72 & 76)
+                if route not in TARGET_ROUTES:
                     continue
                 
                 location = journey.find('.//siri:VehicleLocation', ns)
@@ -220,11 +250,6 @@ def parse_siri_xml(xml_text):
                 
                 bus_id_elem = journey.find('siri:VehicleRef', ns)
                 bus_id = bus_id_elem.text if bus_id_elem is not None else "Unknown"
-                
-                route_elem = journey.find('siri:PublishedLineName', ns)
-                if route_elem is None:
-                    route_elem = journey.find('siri:LineRef', ns)
-                route = route_elem.text if route_elem is not None else "Unknown"
                 
                 operator_elem = journey.find('siri:OperatorRef', ns)
                 operator = operator_elem.text if operator_elem is not None else "Unknown"
@@ -292,7 +317,9 @@ def parse_siri_xml(xml_text):
     
     return buses
 
+
 def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: float):
+    """Fetch live bus positions from BODS API (filtered to routes 72 & 76)."""
     global BUSES_CACHE, BUS_HISTORY
     
     try:
@@ -338,17 +365,18 @@ def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: fl
         print(f"BODS fetch error: {e}")
         return BUSES_CACHE.get("buses", {})
 
+
 def get_buses_for_stop(stop_id: str, lat: float, lon: float):
-    """Get buses approaching a specific stop with real-time positions and trail"""
-    # Find the stop
-    all_stops = get_all_bristol_stops()
-    stop = None
-    for s in all_stops:
-        if s.get("atco_code") == stop_id:
-            stop = s
+    """Get buses approaching a specific stop with real-time positions and trail."""
+    # Lookup stop in directory
+    stop_info = None
+    for sid, info in STOP_DIRECTORY.items():
+        if sid == stop_id or info.get("atco_code") == stop_id:
+            stop_info = info
+            stop_info["sensor_id"] = sid
             break
     
-    if not stop:
+    if not stop_info:
         return None
     
     # Fetch all buses in Bristol area
@@ -360,10 +388,10 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
         next_stop_ref = bus.get("next_stop_ref", "")
         
         # Check if heading to this stop
-        is_heading_to_stop = next_stop_ref == stop_id
+        is_heading_to_stop = next_stop_ref == stop_info.get("atco_code", "")
         
         # Check distance to this stop
-        dist_to_stop = haversine(stop["longitude"], stop["latitude"], bus["longitude"], bus["latitude"])
+        dist_to_stop = haversine(stop_info["lng"], stop_info["lat"], bus["longitude"], bus["latitude"])
         is_near_stop = dist_to_stop < 2.5  # Within 2.5km
         
         if is_heading_to_stop or is_near_stop:
@@ -373,56 +401,93 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
             
             # Include trail if available
             if bus_id in BUS_HISTORY and len(BUS_HISTORY[bus_id]) > 1:
-                bus_copy["trail"] = BUS_HISTORY[bus_id][-20:]  # Last 20 positions
+                bus_copy["trail"] = BUS_HISTORY[bus_id][-20:]
             else:
                 bus_copy["trail"] = []
             
             stop_buses.append(bus_copy)
     
-    # Sort by ETA (estimated based on distance)
+    # Sort by distance
     stop_buses.sort(key=lambda x: x["distance_to_stop"])
     
     return {
-        "stop": stop,
+        "stop": stop_info,
         "buses": stop_buses,
         "count": len(stop_buses)
     }
 
+
+# --- REQUEST/RESPONSE MODELS ---
+
+class SensorData(BaseModel):
+    stop_id: str
+    crowd_count: int
+
+
 # --- API ENDPOINTS ---
 
-@app.get("/stops")
-def get_all_stops(
-    lat: float = Query(None),
-    lon: float = Query(None),
-    radius: float = Query(50.0)  # Large radius to get all Bristol stops
-):
-    """Get all Bristol stops - returns 50 stops for comprehensive coverage"""
-    if lat and lon:
-        stops = get_stops_near_location(lat, lon, radius)
-    else:
-        stops = get_all_bristol_stops()
+@app.post("/update-sensor-data")
+def update_sensor_data(data: SensorData):
+    """
+    Receive crowd count from CV sensor.
+    Validates stop_id against STOP_DIRECTORY, fetches traffic from TomTom,
+    calculates prediction, and saves to database.
+    """
+    stop_id = data.stop_id
+    crowd_count = data.crowd_count
+    
+    # Validation: Check if stop_id exists in STOP_DIRECTORY
+    if stop_id not in STOP_DIRECTORY:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Stop ID '{stop_id}' not found in registry. Available: {list(STOP_DIRECTORY.keys())}"
+        )
+    
+    stop_info = STOP_DIRECTORY[stop_id]
+    lat = stop_info["lat"]
+    lng = stop_info["lng"]
+    stop_name = stop_info["name"]
+    
+    # Traffic Lookup: Use lat/lng from directory to ask TomTom
+    traffic_data = get_tomtom_traffic(lat, lng)
+    traffic_delay = traffic_data["traffic_delay_min"]
+    
+    # Prediction: Calculate delay based on Crowd + Traffic
+    predicted_delay = predict_arrival_delay(traffic_delay, crowd_count, is_raining=False)
+    
+    # Storage: Save to Database
+    db_saved = save_prediction_to_db(
+        stop_id=stop_id,
+        stop_name=stop_name,
+        crowd_count=crowd_count,
+        traffic_delay=traffic_delay,
+        predicted_delay=predicted_delay,
+        lat=lat,
+        lng=lng
+    )
     
     return {
-        "stops": stops,
-        "count": len(stops),
-        "total_available": len(BRISTOL_STOPS),
-        "coverage": "Bristol City Region"
+        "status": "success",
+        "stop_id": stop_id,
+        "stop_name": stop_name,
+        "crowd_count": crowd_count,
+        "traffic_delay_min": traffic_delay,
+        "predicted_delay_min": predicted_delay,
+        "traffic_data": traffic_data,
+        "db_saved": db_saved,
+        "timestamp": datetime.now().isoformat()
     }
 
-@app.get("/nearby-stops")
-def get_nearby_stops(
-    latitude: float = Query(...),
-    longitude: float = Query(...),
-    radius: float = Query(10.0)  # 10km radius
-):
-    """Get nearby stops - for map display"""
-    stops = get_stops_near_location(latitude, longitude, radius)
+
+@app.get("/stops")
+def get_all_stops():
+    """Get all stops from the Modular Stop Directory."""
     return {
-        "stops": stops,
-        "count": len(stops),
-        "user_location": {"lat": latitude, "lon": longitude},
-        "radius_km": radius
+        "stops": STOP_DIRECTORY,
+        "count": len(STOP_DIRECTORY),
+        "target_routes": TARGET_ROUTES
     }
+
 
 @app.get("/stop/{stop_id}/buses")
 def get_stop_buses(
@@ -430,43 +495,14 @@ def get_stop_buses(
     lat: float = Query(...),
     lon: float = Query(...)
 ):
-    """Get buses for a specific stop with real-time locations"""
+    """Get buses for a specific stop with real-time locations."""
     result = get_buses_for_stop(stop_id, lat, lon)
     
     if not result:
-        raise HTTPException(status_code=404, detail="Stop not found")
+        raise HTTPException(status_code=404, detail="Stop not found in directory")
     
     return result
 
-@app.get("/search-stops")
-def search_stops(
-    q: str = Query(...),
-    lat: float = Query(None),
-    lon: float = Query(None)
-):
-    """Search stops"""
-    all_stops = get_all_bristol_stops()
-    query = q.lower()
-    
-    results = []
-    for stop in all_stops:
-        name = (stop.get("common_name") or "").lower()
-        locality = (stop.get("locality") or "").lower()
-        
-        if query in name or query in locality:
-            stop_data = dict(stop)
-            if lat and lon:
-                try:
-                    dist = haversine(lon, lat, stop["longitude"], stop["latitude"])
-                    stop_data["distance_km"] = round(dist, 2)
-                except:
-                    pass
-            results.append(stop_data)
-    
-    if lat and lon:
-        results.sort(key=lambda x: x.get("distance_km", 999))
-    
-    return {"results": results[:20], "count": len(results)}
 
 @app.get("/all-buses")
 def get_all_buses(
@@ -474,7 +510,7 @@ def get_all_buses(
     lon: float = Query(...),
     radius: float = Query(15.0)
 ):
-    """Get all buses in Bristol area"""
+    """Get all buses (Routes 72 & 76 only) in Bristol area."""
     lat_offset = radius / 111.0
     lon_offset = radius / (111.0 * cos(radians(lat)))
     
@@ -487,18 +523,40 @@ def get_all_buses(
         bus_copy["distance_km"] = round(dist, 2)
         result.append(bus_copy)
     
-    return {"buses": result, "count": len(result)}
+    return {
+        "buses": result, 
+        "count": len(result),
+        "filtered_routes": TARGET_ROUTES
+    }
+
+
+@app.get("/directory")
+def get_stop_directory():
+    """Get the full STOP_DIRECTORY registry."""
+    return {
+        "directory": STOP_DIRECTORY,
+        "total_stops": len(STOP_DIRECTORY),
+        "note": "Add new stops to STOP_DIRECTORY in main.py"
+    }
+
 
 @app.get("/health")
 def health_check():
+    """System health check."""
     return {
         "status": "healthy",
-        "stops_count": len(BRISTOL_STOPS),
+        "version": "4.0.0",
+        "modular_id_system": "active",
+        "registered_stops": len(STOP_DIRECTORY),
+        "target_routes": TARGET_ROUTES,
         "buses_tracked": len(BUSES_CACHE.get("buses", {})),
-        "version": "3.2.0"
+        "ml_model_loaded": bst is not None
     }
+
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"Transight API v3.2 - {len(BRISTOL_STOPS)} Bristol stops loaded")
+    print(f"🚀 Transight API v4.0 - Modular ID System")
+    print(f"📍 Registered Stops: {list(STOP_DIRECTORY.keys())}")
+    print(f"🚌 Target Routes: {TARGET_ROUTES}")
     uvicorn.run(app, host="0.0.0.0", port=8000)
