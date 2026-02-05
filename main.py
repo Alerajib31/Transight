@@ -480,11 +480,43 @@ def update_sensor_data(data: SensorData):
 
 
 @app.get("/stops")
-def get_all_stops():
+def get_all_stops(
+    lat: float = Query(None),
+    lon: float = Query(None),
+    radius: float = Query(50.0)
+):
     """Get all stops from the Modular Stop Directory."""
+    # Convert STOP_DIRECTORY object to array format for frontend compatibility
+    stops_array = []
+    for stop_id, info in STOP_DIRECTORY.items():
+        stop_data = {
+            "atco_code": info.get("atco_code", stop_id),
+            "common_name": info.get("name", "Unknown"),
+            "locality": "Bristol",
+            "indicator": stop_id,
+            "latitude": info.get("lat"),
+            "longitude": info.get("lng"),
+            "sensor_id": stop_id
+        }
+        
+        # Calculate distance if user location provided
+        if lat and lon:
+            try:
+                dist = haversine(lon, lat, info.get("lng"), info.get("lat"))
+                stop_data["distance_km"] = round(dist, 2)
+            except:
+                pass
+        
+        stops_array.append(stop_data)
+    
+    # Filter by radius if location provided
+    if lat and lon:
+        stops_array = [s for s in stops_array if s.get("distance_km", 999) <= radius]
+        stops_array.sort(key=lambda x: x.get("distance_km", 999))
+    
     return {
-        "stops": STOP_DIRECTORY,
-        "count": len(STOP_DIRECTORY),
+        "stops": stops_array,
+        "count": len(stops_array),
         "target_routes": TARGET_ROUTES
     }
 
