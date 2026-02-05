@@ -144,7 +144,7 @@ bst = None
 if os.path.exists(model_path):
     bst = xgb.Booster()
     bst.load_model(model_path)
-    print(f"✅ ML Model loaded: {model_path}")
+    print(f"[OK] ML Model loaded: {model_path}")
 
 # --- HELPER FUNCTIONS ---
 
