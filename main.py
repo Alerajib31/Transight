@@ -33,35 +33,102 @@ DB_PARAMS = {
 BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
 TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"  # Replace with actual TomTom API key
 
-# Target Routes Filter
-# Target routes - supports exact match OR starts with pattern
-# e.g., "72" will match "72", "72A", "72-Frenchay", "720", etc.
-TARGET_ROUTES = ["72", "76"]
+# Target Routes Filter - FOCUS ONLY ON ROUTE 72
+TARGET_ROUTES = ["72"]
 
 # ==========================================
-# MODULAR STOP DIRECTORY (The "Registry")
+# ROUTE 72 GEOMETRY (Actual bus route path)
 # ==========================================
-# Easy to add new stops - just add a new entry here
+# Coordinates along Route 72: Temple Meads → UWE Frenchay
+# This defines the actual path the bus takes
+ROUTE_72_GEOMETRY = [
+    # Temple Meads area
+    {"lat": 51.4496, "lng": -2.5811, "name": "Temple Meads Station"},
+    {"lat": 51.4510, "lng": -2.5820, "name": "Temple Gate"},
+    # City Centre
+    {"lat": 51.4528, "lng": -2.5975, "name": "The Centre"},
+    {"lat": 51.4545, "lng": -2.5879, "name": "Cabot Circus"},
+    # Stokes Croft / Gloucester Road
+    {"lat": 51.4600, "lng": -2.5880, "name": "Stokes Croft"},
+    {"lat": 51.4640, "lng": -2.5900, "name": "Gloucester Road"},
+    # Horfield
+    {"lat": 51.4750, "lng": -2.5850, "name": "Horfield"},
+    # Southmead
+    {"lat": 51.4900, "lng": -2.5950, "name": "Southmead Hospital"},
+    # UWE Frenchay
+    {"lat": 51.5005, "lng": -2.5490, "name": "UWE Frenchay Campus"},
+]
+
+# ==========================================
+# MODULAR STOP DIRECTORY (Route 72 Stops Only)
+# ==========================================
+# Only stops that are actually ON Route 72
 STOP_DIRECTORY = {
     "BST-001": {
-        "name": "Temple Meads",
+        "name": "Temple Meads Station",
         "lat": 51.4496,
         "lng": -2.5811,
-        "atco_code": "01000053220"
+        "atco_code": "01000053220",
+        "route": "72",
+        "order": 1  # First stop on route
+    },
+    "BST-004": {
+        "name": "The Centre",
+        "lat": 51.4528,
+        "lng": -2.5975,
+        "atco_code": "01000002301",
+        "route": "72",
+        "order": 2
     },
     "BST-002": {
         "name": "Cabot Circus",
         "lat": 51.4545,
         "lng": -2.5879,
-        "atco_code": "01000588088"
+        "atco_code": "01000588088",
+        "route": "72",
+        "order": 3
+    },
+    "BST-005": {
+        "name": "Stokes Croft",
+        "lat": 51.4600,
+        "lng": -2.5880,
+        "atco_code": "01000030101",
+        "route": "72",
+        "order": 4
+    },
+    "BST-006": {
+        "name": "Gloucester Road",
+        "lat": 51.4640,
+        "lng": -2.5900,
+        "atco_code": "01000046701",
+        "route": "72",
+        "order": 5
+    },
+    "BST-007": {
+        "name": "Horfield",
+        "lat": 51.4750,
+        "lng": -2.5850,
+        "atco_code": "01000048901",
+        "route": "72",
+        "order": 6
+    },
+    "BST-008": {
+        "name": "Southmead Hospital",
+        "lat": 51.4900,
+        "lng": -2.5950,
+        "atco_code": "01000055001",
+        "route": "72",
+        "order": 7
     },
     "BST-003": {
-        "name": "Clifton Down",
-        "lat": 51.4645,
-        "lng": -2.6098,
-        "atco_code": "01000058001"
+        "name": "UWE Frenchay Campus",
+        "lat": 51.5005,
+        "lng": -2.5490,
+        "atco_code": "01000057001",
+        "route": "72",
+        "order": 8  # Last stop on route
     },
-    # Future stops can be added here easily following the same pattern
+    # Future Route 72 stops can be added here
 }
 
 # Cache
@@ -636,6 +703,84 @@ def get_stop_directory():
         "directory": STOP_DIRECTORY,
         "total_stops": len(STOP_DIRECTORY),
         "note": "Add new stops to STOP_DIRECTORY in main.py"
+    }
+
+
+@app.get("/route/72/geometry")
+def get_route_72_geometry():
+    """Get the Route 72 geometry (path from Temple Meads to UWE Frenchay)."""
+    return {
+        "route": "72",
+        "name": "Temple Meads to UWE Frenchay",
+        "direction": "Northbound",
+        "geometry": ROUTE_72_GEOMETRY,
+        "stops": [
+            {
+                "id": stop_id,
+                "name": info["name"],
+                "lat": info["lat"],
+                "lng": info["lng"],
+                "order": info.get("order", 99)
+            }
+            for stop_id, info in STOP_DIRECTORY.items()
+            if info.get("route") == "72"
+        ],
+        "total_points": len(ROUTE_72_GEOMETRY)
+    }
+
+
+@app.get("/route/72/buses")
+def get_route_72_buses():
+    """
+    Get all Route 72 buses with real-time positions.
+    Returns buses with their progress along the route.
+    """
+    # Fetch buses in the Route 72 corridor
+    all_buses = fetch_live_buses(-2.75, 51.38, -2.45, 51.55)
+    
+    # Filter to only Route 72
+    route_72_buses = []
+    for bus_id, bus in all_buses.items():
+        route = bus.get("route", "")
+        # Exact match or starts with 72 (but not 720, 721, etc)
+        if route == "72" or route.startswith("72-") or route == "72A":
+            bus_copy = dict(bus)
+            
+            # Find nearest point on route geometry
+            nearest_idx = 0
+            min_dist = float('inf')
+            for i, point in enumerate(ROUTE_72_GEOMETRY):
+                dist = haversine(
+                    bus["longitude"], bus["latitude"],
+                    point["lng"], point["lat"]
+                )
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest_idx = i
+            
+            bus_copy["route_progress"] = {
+                "nearest_point_index": nearest_idx,
+                "nearest_stop": ROUTE_72_GEOMETRY[nearest_idx]["name"],
+                "distance_from_route_km": round(min_dist, 2),
+                "is_on_route": min_dist < 0.5  # Within 500m of route
+            }
+            
+            # Include trail
+            if bus_id in BUS_HISTORY and len(BUS_HISTORY[bus_id]) > 1:
+                bus_copy["trail"] = BUS_HISTORY[bus_id][-20:]
+            else:
+                bus_copy["trail"] = []
+            
+            route_72_buses.append(bus_copy)
+    
+    # Sort by progress along route (from Temple Meads to Frenchay)
+    route_72_buses.sort(key=lambda x: x["route_progress"]["nearest_point_index"])
+    
+    return {
+        "route": "72",
+        "buses": route_72_buses,
+        "count": len(route_72_buses),
+        "last_updated": BUSES_CACHE.get("timestamp")
     }
 
 

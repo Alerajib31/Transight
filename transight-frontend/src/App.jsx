@@ -79,7 +79,7 @@ const getRouteColor = (route) => {
 const formatTime = (mins) => mins <= 1 ? 'Due' : `${Math.round(mins)} min`;
 const formatDist = (km) => km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 
-function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onStopClick }) {
+function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onStopClick, route72Geometry, route72Buses, onBusClick }) {
   const mapRef = useRef(null);
   const initialized = useRef(false);
   
@@ -96,6 +96,9 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
     }
   }, [selectedBus?.bus_id]);
   
+  // Route 72 geometry line
+  const route72Line = route72Geometry?.geometry?.map(p => [p.lat, p.lng]) || [];
+  
   const busTrail = selectedBus?.trail?.length > 1 
     ? selectedBus.trail.map(p => [p.lat, p.lon])
     : [];
@@ -103,7 +106,7 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
   return (
     <MapContainer
       center={userLocation || [51.4545, -2.5879]}
-      zoom={14}
+      zoom={13}
       style={{ height: "100%", width: "100%" }}
       zoomControl={false}
       whenCreated={(m) => { mapRef.current = m; }}
@@ -116,7 +119,63 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
         </Marker>
       )}
       
-      {viewMode === 'stops' && stops.map(stop => (
+      {/* ROUTE 72 VIEW */}
+      {(viewMode === 'route72' || viewMode === 'stops') && route72Line.length > 1 && (
+        <>
+          {/* Route 72 Line - Purple */}
+          <Polyline
+            positions={route72Line}
+            pathOptions={{ 
+              color: '#8b5cf6', 
+              weight: 8, 
+              opacity: 0.9,
+              lineCap: 'round',
+              lineJoin: 'round'
+            }}
+          />
+          {/* Route 72 Stops */}
+          {route72Geometry?.stops?.map(stop => (
+            <Marker
+              key={stop.id}
+              position={[stop.lat, stop.lng]}
+              icon={stopIcon(selectedStop?.atco_code === stop.atco_code)}
+              eventHandlers={{ click: () => onStopClick(stop) }}
+            >
+              <Popup>
+                <Typography variant="subtitle2">{stop.name}</Typography>
+                <Typography variant="caption">Route 72 Stop #{stop.order}</Typography>
+              </Popup>
+            </Marker>
+          ))}
+          {/* Route 72 Buses */}
+          {route72Buses.map(bus => (
+            <Marker
+              key={bus.bus_id}
+              position={[bus.latitude, bus.longitude]}
+              icon={busIcon('72', '#8b5cf6', bus.bearing)}
+              zIndexOffset={2000}
+              eventHandlers={{ click: () => onBusClick(bus) }}
+            >
+              <Popup>
+                <Box sx={{ minWidth: 200 }}>
+                  <Typography variant="h6" fontWeight={700} color="#8b5cf6">Route 72</Typography>
+                  <Typography variant="body2">→ {bus.destination}</Typography>
+                  <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                    Speed: {Math.round(bus.speed || 0)} km/h
+                  </Typography>
+                  {bus.route_progress && (
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      Near: {bus.route_progress.nearest_stop}
+                    </Typography>
+                  )}
+                </Box>
+              </Popup>
+            </Marker>
+          ))}
+        </>
+      )}
+      
+      {viewMode === 'stops' && !route72Geometry && stops.map(stop => (
         <Marker
           key={stop.atco_code}
           position={[stop.latitude, stop.longitude]}
@@ -129,10 +188,9 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
         <Marker position={[selectedStop.latitude, selectedStop.longitude]} icon={stopIcon(true)} />
       )}
       
-      {/* BUS ROUTE PATH - Thick blue line */}
+      {/* BUS DETAIL VIEW - GPS Trail */}
       {viewMode === 'bus-detail' && busTrail.length > 1 && (
         <>
-          {/* Background line for better visibility */}
           <Polyline
             positions={busTrail}
             pathOptions={{ 
@@ -143,7 +201,6 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
               lineJoin: 'round'
             }}
           />
-          {/* Main blue line */}
           <Polyline
             positions={busTrail}
             pathOptions={{ 
@@ -179,7 +236,7 @@ function MapView({ userLocation, stops, selectedStop, selectedBus, viewMode, onS
 }
 
 function App() {
-  const [viewMode, setViewMode] = useState('stops');
+  const [viewMode, setViewMode] = useState('route72'); // Default to Route 72 view
   const [userLocation, setUserLocation] = useState(null);
   const [allStops, setAllStops] = useState([]);
   const [selectedStop, setSelectedStop] = useState(null);
@@ -190,6 +247,10 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  
+  // Route 72 specific state
+  const [route72Geometry, setRoute72Geometry] = useState(null);
+  const [route72Buses, setRoute72Buses] = useState([]);
   
   // Bottom sheet state
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -226,6 +287,29 @@ function App() {
   useEffect(() => {
     fetchAllStops();
   }, [fetchAllStops]);
+  
+  // Fetch Route 72 geometry and buses
+  const fetchRoute72Data = useCallback(async () => {
+    try {
+      // Fetch route geometry
+      const geoRes = await axios.get(`${API_BASE_URL}/route/72/geometry`);
+      setRoute72Geometry(geoRes.data);
+      
+      // Fetch Route 72 buses
+      const busesRes = await axios.get(`${API_BASE_URL}/route/72/buses`);
+      setRoute72Buses(busesRes.data.buses || []);
+      setLastUpdate(new Date());
+    } catch (e) {
+      console.error("Error fetching Route 72 data:", e);
+    }
+  }, []);
+  
+  // Poll Route 72 data every 10 seconds
+  useEffect(() => {
+    fetchRoute72Data();
+    const interval = setInterval(fetchRoute72Data, 10000);
+    return () => clearInterval(interval);
+  }, [fetchRoute72Data]);
   
   const fetchStopBuses = useCallback(async (stop) => {
     if (!stop || !userLocation) return;
@@ -288,12 +372,14 @@ function App() {
   const handleBack = () => {
     if (viewMode === 'bus-detail') {
       setSelectedBus(null);
-      setViewMode('bus-list');
-    } else {
+      setViewMode('route72');
+    } else if (viewMode === 'bus-list') {
       setSelectedStop(null);
       setStopBuses([]);
       setSheetOpen(false);
-      setViewMode('stops');
+      setViewMode('route72');
+    } else {
+      setViewMode('route72');
     }
   };
   
@@ -331,7 +417,19 @@ function App() {
           selectedBus={selectedBus}
           viewMode={viewMode}
           onStopClick={handleStopClick}
+          route72Geometry={route72Geometry}
+          route72Buses={route72Buses}
+          onBusClick={handleBusClick}
         />
+      </Box>
+      
+      {/* Route 72 Header */}
+      <Box sx={{ position: 'absolute', top: 80, left: 16, zIndex: 1000 }}>
+        <Paper elevation={3} sx={{ borderRadius: 2, px: 2, py: 1, bgcolor: '#8b5cf6', color: 'white' }}>
+          <Typography fontWeight={700}>Route 72</Typography>
+          <Typography variant="caption" display="block">Temple Meads ↔ UWE Frenchay</Typography>
+          <Typography variant="caption" display="block">{route72Buses.length} bus{route72Buses.length !== 1 ? 'es' : ''} active</Typography>
+        </Paper>
       </Box>
       
       {/* Search Bar */}
@@ -344,7 +442,8 @@ function App() {
             >
               <SearchIcon sx={{ color: '#9ca3af', mr: 1.5 }} />
               <Typography color="#9ca3af">
-                {viewMode === 'stops' ? 'Search for a stop...' : 
+                {viewMode === 'route72' ? 'Route 72 - Temple Meads to UWE' : 
+                 viewMode === 'stops' ? 'Search for a stop...' : 
                  viewMode === 'bus-list' ? selectedStop?.common_name :
                  `Bus ${selectedBus?.route} to ${selectedBus?.destination}`}
               </Typography>
@@ -380,9 +479,10 @@ function App() {
                       }}
                       sx={{ px: 2, py: 1.5, borderBottom: '1px solid #f3f4f6', cursor: 'pointer', '&:hover': { bgcolor: '#f9fafb' } }}
                     >
-                      <Typography fontWeight={600}>{stop.common_name}</Typography>
+                      <Typography fontWeight={600}>{stop.common_name || stop.name}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {stop.locality} {stop.distance_km && `• ${formatDist(stop.distance_km)}`}
+                        {stop.locality || 'Bristol'} {stop.distance_km && `• ${formatDist(stop.distance_km)}`}
+                        {stop.order && ` • Stop #${stop.order}`}
                       </Typography>
                     </Box>
                   ))}
