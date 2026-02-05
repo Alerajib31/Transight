@@ -34,6 +34,8 @@ BODS_API_KEY = "2bc39438a3eeec844704f182bab7892fea39b8bd"
 TOMTOM_API_KEY = "IgrkN0Ci9H94UGQWLoBSpzSFEycU8Xiy"  # Replace with actual TomTom API key
 
 # Target Routes Filter
+# Target routes - supports exact match OR starts with pattern
+# e.g., "72" will match "72", "72A", "72-Frenchay", "720", etc.
 TARGET_ROUTES = ["72", "76"]
 
 # ==========================================
@@ -92,48 +94,87 @@ def get_tomtom_traffic(lat: float, lng: float):
     """
     Fetch real-time traffic data from TomTom API.
     Returns traffic delay in minutes and current speed.
+    
+    NOTE: Get a free API key from https://developer.tomtom.com/
     """
+    # Check if API key looks valid (TomTom keys are typically longer)
+    if not TOMTOM_API_KEY or len(TOMTOM_API_KEY) < 20:
+        print("⚠️  TomTom API key not configured. Using fallback traffic estimation.")
+        return {
+            "traffic_delay_min": 0,
+            "current_speed_kph": 40,
+            "free_flow_speed_kph": 40,
+            "congestion_level": 0,
+            "status": "no_api_key"
+        }
+    
     try:
         # TomTom Flow Segment Data API
-        url = f"https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+        # Using relative0 endpoint which works with just coordinates
+        url = "https://api.tomtom.com/traffic/services/4/flowSegmentData/relative0/10/json"
         params = {
             "key": TOMTOM_API_KEY,
-            "point": f"{lat},{lng}"
+            "point": f"{lat},{lng}",
+            "unit": "KMPH"
         }
         
         response = requests.get(url, params=params, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
+            
+            # Check for API error in response
+            if "error" in data:
+                print(f"TomTom API returned error: {data.get('error', 'Unknown')}")
+                return {
+                    "traffic_delay_min": 0,
+                    "current_speed_kph": 40,
+                    "free_flow_speed_kph": 40,
+                    "congestion_level": 0,
+                    "status": "api_error_response"
+                }
+            
             flow = data.get("flowSegmentData", {})
             
             current_speed = flow.get("currentSpeed", 0)
             free_flow_speed = flow.get("freeFlowSpeed", 0)
+            confidence = flow.get("confidence", 0)
             
-            # Calculate delay: if current_speed is significantly lower than free_flow_speed
+            # Calculate delay based on speed ratio
+            delay_min = 0
             if free_flow_speed > 0 and current_speed > 0:
                 speed_ratio = current_speed / free_flow_speed
-                if speed_ratio < 0.5:
-                    # Heavy traffic - estimate 10-20 min delay
+                if speed_ratio < 0.3:
+                    # Severe congestion
+                    delay_min = round((1 - speed_ratio) * 25, 1)
+                elif speed_ratio < 0.6:
+                    # Heavy traffic
                     delay_min = round((1 - speed_ratio) * 20, 1)
-                elif speed_ratio < 0.8:
-                    # Moderate traffic - estimate 5-10 min delay
+                elif speed_ratio < 0.85:
+                    # Moderate traffic
                     delay_min = round((1 - speed_ratio) * 15, 1)
-                else:
-                    # Light traffic
-                    delay_min = 0
-            else:
-                delay_min = 0
+                # Light traffic = no delay
+            
+            print(f"🚦 TomTom Traffic at ({lat:.4f}, {lng:.4f}): {current_speed}/{free_flow_speed} km/h, delay: {delay_min}min")
                 
             return {
                 "traffic_delay_min": delay_min,
                 "current_speed_kph": current_speed,
                 "free_flow_speed_kph": free_flow_speed,
-                "congestion_level": flow.get("confidence", 0),
+                "congestion_level": confidence,
                 "status": "success"
             }
+        elif response.status_code == 403:
+            print(f"🚫 TomTom API access denied (403). Check your API key at https://developer.tomtom.com/")
+            return {
+                "traffic_delay_min": 0,
+                "current_speed_kph": 0,
+                "free_flow_speed_kph": 0,
+                "congestion_level": 0,
+                "status": "invalid_api_key"
+            }
         else:
-            print(f"TomTom API error: {response.status_code}")
+            print(f"⚠️  TomTom API error: {response.status_code} - {response.text[:100]}")
             return {
                 "traffic_delay_min": 0,
                 "current_speed_kph": 0,
@@ -141,8 +182,17 @@ def get_tomtom_traffic(lat: float, lng: float):
                 "congestion_level": 0,
                 "status": f"api_error_{response.status_code}"
             }
+    except requests.exceptions.Timeout:
+        print("⏱️  TomTom API timeout")
+        return {
+            "traffic_delay_min": 0,
+            "current_speed_kph": 0,
+            "free_flow_speed_kph": 0,
+            "congestion_level": 0,
+            "status": "timeout"
+        }
     except Exception as e:
-        print(f"TomTom fetch error: {e}")
+        print(f"❌ TomTom fetch error: {e}")
         return {
             "traffic_delay_min": 0,
             "current_speed_kph": 0,
@@ -232,9 +282,16 @@ def parse_siri_xml(xml_text):
                     route_elem = journey.find('siri:LineRef', ns)
                 route = route_elem.text if route_elem is not None else "Unknown"
                 
-                # FILTER: Only keep target routes (72 & 76)
-                if route not in TARGET_ROUTES:
+                # FILTER: Only keep target routes (72 & 76 and variants)
+                # Check if route starts with any of our target routes
+                is_target_route = any(route.startswith(tr) for tr in TARGET_ROUTES)
+                if not is_target_route:
+                    # Debug: print skipped routes (only occasionally to avoid spam)
+                    if hash(route) % 100 == 0:
+                        print(f"  🚫 Skipping route: {route}")
                     continue
+                else:
+                    print(f"  ✅ Found target route: {route} (bus: {bus_id}, dest: {destination})")
                 
                 location = journey.find('.//siri:VehicleLocation', ns)
                 if location is None:
@@ -329,10 +386,12 @@ def fetch_live_buses(min_lon: float, min_lat: float, max_lon: float, max_lat: fl
             "boundingBox": f"{min_lon},{min_lat},{max_lon},{max_lat}"
         }
         
+        print(f"🚌 Fetching BODS data for bbox: {min_lon},{min_lat},{max_lon},{max_lat}")
         response = requests.get(url, params=params, timeout=15)
         
         if response.status_code == 200:
             buses_list = parse_siri_xml(response.text)
+            print(f"📊 Total buses from BODS: {len(buses_list)} (filtered to routes {TARGET_ROUTES})")
             
             current_time = time.time()
             bus_dict = {}
@@ -377,15 +436,22 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
             break
     
     if not stop_info:
+        print(f"⚠️  Stop {stop_id} not found in directory")
         return None
     
-    # Fetch all buses in Bristol area
-    all_buses = fetch_live_buses(-2.7, 51.4, -2.5, 51.6)
+    print(f"🔍 Looking for buses near: {stop_info['name']} ({stop_id}) at ({stop_info['lat']}, {stop_info['lng']})")
+    
+    # Fetch all buses in Greater Bristol area (covers Frenchay, Southmead, Cribbs Causeway)
+    # Bounding box: (min_lon, min_lat, max_lon, max_lat)
+    # West: -2.75, South: 51.38, East: -2.45, North: 51.55
+    all_buses = fetch_live_buses(-2.75, 51.38, -2.45, 51.55)
+    print(f"🔍 Total buses in area: {len(all_buses)}")
     
     # Find buses heading to or near this stop
     stop_buses = []
     for bus_id, bus in all_buses.items():
         next_stop_ref = bus.get("next_stop_ref", "")
+        bus_route = bus.get("route", "Unknown")
         
         # Check if heading to this stop
         is_heading_to_stop = next_stop_ref == stop_info.get("atco_code", "")
@@ -395,6 +461,7 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
         is_near_stop = dist_to_stop < 2.5  # Within 2.5km
         
         if is_heading_to_stop or is_near_stop:
+            print(f"  🚌 Bus {bus_id} (Route {bus_route}) near stop: {dist_to_stop:.2f}km, trail points: {len(bus.get('trail', []))}")
             bus_copy = dict(bus)
             bus_copy["distance_to_stop"] = round(dist_to_stop, 2)
             bus_copy["distance_to_user"] = round(haversine(lon, lat, bus["longitude"], bus["latitude"]), 2)
@@ -409,6 +476,8 @@ def get_buses_for_stop(stop_id: str, lat: float, lon: float):
     
     # Sort by distance
     stop_buses.sort(key=lambda x: x["distance_to_stop"])
+    
+    print(f"✅ Returning {len(stop_buses)} buses for stop {stop_id}")
     
     return {
         "stop": stop_info,
