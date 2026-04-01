@@ -70,25 +70,50 @@ A `data-theme` attribute on `<html>` controls the active theme. CSS custom prope
 4. On toggle click: flip theme, save to `localStorage`, update `data-theme`
 5. If `localStorage` is unavailable: fall back to system preference silently
 
-### CSS Structure
+### CSS Structure — Tailwind v4 `@theme` Compatibility
 
-Current `@theme` block in `index.css` defines dark-mode values as defaults. Add a `:root` / `[data-theme="light"]` block that overrides these variables for light mode. The existing `[data-theme="dark"]` or default values handle dark mode.
+The current `@theme` block in `index.css` registers CSS custom properties at `:root` level for the Tailwind compiler. To avoid specificity conflicts between `@theme` output and manual variable overrides:
+
+**Strategy:** Keep the `@theme` block for non-color variables only (`--font-sans`). Move all color variables out of `@theme` and into explicit `[data-theme]` selector blocks. This avoids `:root`-level specificity fights between `@theme` output and theme overrides.
 
 ```css
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Color variables REMOVED from @theme — moved to [data-theme] blocks */
+}
+
 /* Light mode */
-:root, [data-theme="light"] {
+[data-theme="light"] {
   --color-bg-primary: #f8fafc;
   --color-bg-card: #ffffff;
-  /* ... */
+  --color-bg-card-hover: #f1f5f9;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-border: #e2e8f0;
+  --color-accent: #1d4ed8;
+  --color-accent-glow: #2563eb;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --color-success: #10b981;
 }
 
 /* Dark mode */
 [data-theme="dark"] {
   --color-bg-primary: #0b0f19;
   --color-bg-card: #111827;
-  /* ... */
+  --color-bg-card-hover: #1f2937;
+  --color-text-primary: #f9fafb;
+  --color-text-secondary: #9ca3af;
+  --color-border: #1e293b;
+  --color-accent: #3b82f6;
+  --color-accent-glow: #2563eb;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --color-success: #10b981;
 }
 ```
+
+**Important:** Tailwind v4 utility classes like `bg-bg-card` resolve via the `@theme` registration. Since we're moving colors out of `@theme`, we must ensure Tailwind still recognizes them. The `[data-theme]` variables will still work as long as the variable names match what Tailwind expects. If Tailwind v4 requires `@theme` for utility class generation, keep the dark-mode values in `@theme` as defaults and add `[data-theme="light"]` overrides with higher specificity.
 
 ## Section 2: Color-Coded Bus Markers
 
@@ -104,6 +129,22 @@ Current `@theme` block in `index.css` defines dark-mode values as defaults. Add 
 ### Implementation
 
 A helper function `getBusMarkerColors(delayMinutes)` returns `{ background, glow }` based on the thresholds above. The `busIcon` creation moves from a module-level constant to a per-bus dynamic `DivIcon` constructed inside the map render loop using the bus's `delay_minutes` value.
+
+**Data pipeline fix:** The existing `allBusPositions` mapping must include `delay_minutes` for marker coloring to work. Update the mapping:
+
+```jsx
+const allBusPositions = buses.map((b, index) => ({
+  key: getBusKey(b, index),
+  vehicle_id: b.vehicle_id,
+  operator: b.operator,
+  position: [b.position.lat, b.position.lng],
+  eta: b.eta,
+  passengers: b.passenger_count,
+  delay_minutes: b.delay_minutes,  // ADDED — required for color-coded markers
+}));
+```
+
+Helper function:
 
 ```jsx
 function getBusMarkerColors(delayMinutes) {
@@ -139,15 +180,19 @@ Both are free, require no API key, and support retina (`{r}`) tiles.
 
 ### Route Polyline
 
-The polyline color adjusts for contrast:
+The polyline color adjusts for contrast (this is a JSX prop change, not CSS):
 - Light mode: `#1d4ed8` (deeper blue on light background)
 - Dark mode: `#3b82f6` (brighter blue on dark background)
+
+Implementation: `color={theme === 'dark' ? '#3b82f6' : '#1d4ed8'}` on the `<Polyline>` component.
 
 Polyline weight and dash pattern remain the same (weight 4, dash `10, 10`).
 
 ### Reactivity
 
-The `TileLayer` `url` prop is driven by the current theme state. When the theme toggles, the tile URL changes and Leaflet reloads tiles. Leaflet may need a `key` prop on `TileLayer` to force a re-mount when the URL changes.
+The `TileLayer` `url` prop is driven by the current theme state. When the theme toggles, the tile URL changes and Leaflet reloads tiles. Leaflet needs a `key` prop on `TileLayer` to force a re-mount when the URL changes (e.g., `key={theme}`).
+
+**Note:** `MapContainer` center behavior is a separate pre-existing issue — it does not re-render on `center` prop changes after initial mount. This is out of scope for this retheme.
 
 ## Section 4: Card Restyling
 
@@ -186,6 +231,7 @@ Current CSS has Leaflet overrides for light-themed controls. These remain approp
 A sun/moon icon button placed next to the route selector in the header. Uses inline SVG or Unicode characters for zero dependencies:
 - Light mode active: Show moon icon (click to switch to dark)
 - Dark mode active: Show sun icon (click to switch to light)
+- Icon-only button (no text label) — fits at all breakpoints including mobile
 
 ### Header Adaptation
 
@@ -197,8 +243,9 @@ A sun/moon icon button placed next to the route selector in the header. Uses inl
 A `useTheme` custom hook or inline `useState` + `useEffect` in `App.jsx`:
 - `const [theme, setTheme] = useState(() => { /* check localStorage, then prefers-color-scheme */ })`
 - `useEffect` syncs `data-theme` attribute on `<html>` when `theme` changes
+- `useEffect` also registers a `matchMedia("(prefers-color-scheme: dark)")` change listener so the theme follows system changes in real-time when no manual override is saved. Cleanup the listener on unmount.
 - Toggle function flips state and writes to `localStorage`
-- Approximately 15 lines of code
+- Approximately 20 lines of code
 
 ## Section 6: Testing & Error Handling
 
@@ -231,7 +278,7 @@ A `useTheme` custom hook or inline `useState` + `useEffect` in `App.jsx`:
 | File | Changes |
 |------|---------|
 | `client/src/index.css` | Add light/dark theme variable blocks, dark-mode Leaflet overrides, light-mode card shadow, ETA card light-mode accent |
-| `client/src/App.jsx` | Add theme state + toggle, dynamic bus marker colors, themed tile URL, themed polyline color, toggle button in header |
+| `client/src/App.jsx` | Add theme state + toggle + matchMedia listener, dynamic bus marker colors, add `delay_minutes` to `allBusPositions`, themed tile URL, themed polyline color (`color` prop), toggle button in header, replace hardcoded `text-white` with `text-text-primary` and `bg-white` with `bg-bg-card` on map container |
 
 ## Out of Scope
 
