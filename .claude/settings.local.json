@@ -16,7 +16,8 @@
       "Bash(where python:*)",
       "Bash(where py:*)",
       "Bash(py:*)",
-      "Bash(C:/Users/rajib/AppData/Local/Programs/Python/Python312/Scripts/notebooklm.exe login:*)"
+      "Bash(C:/Users/rajib/AppData/Local/Programs/Python/Python312/Scripts/notebooklm.exe login:*)",
+      "Bash(pip3 install:*)"
     ]
   }
 }
