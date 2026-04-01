@@ -5,7 +5,9 @@
       "Bash(export PATH=\"$PATH:/c/Users/rajib/AppData/Roaming/npm\")",
       "Bash(codex --version)",
       "Bash(setx PATH:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(export PATH=\"/c/Users/rajib/AppData/Roaming/npm:$PATH\")",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
