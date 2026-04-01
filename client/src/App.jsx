@@ -242,13 +242,29 @@ export default function App() {
   const eta = activeBus?.eta ?? "--";
   const passengers = activeBus?.passenger_count ?? 0;
   const highDemand = passengers > 15;
-  const activeDelay = activeBus?.delay_minutes ?? routePredictions.current_delay;
   const activeServiceTime = activeBus?.scheduled_service_time ?? routePredictions.service_time;
   const displayStopPredictions =
     activeBus?.stop_predictions?.length > 0
       ? activeBus.stop_predictions
       : routePredictions.stops;
   const showingLivePredictions = activeBus?.stop_predictions?.length > 0;
+  const getStopPrediction = (routeStop) =>
+    displayStopPredictions.find((prediction) => {
+      if (prediction.stop_id && routeStop.stop?.stop_id) {
+        return prediction.stop_id === routeStop.stop.stop_id;
+      }
+
+      return (
+        prediction.stop_sequence === routeStop.sequence ||
+        prediction.stop_sequence === routeStop.sequence + 1
+      );
+    }) || null;
+  const getStopStatusLabel = (status) => {
+    if (status === "current") return "Current location";
+    if (status === "departed") return "Departed";
+    if (status === "scheduled") return "Scheduled service";
+    return "Upcoming";
+  };
   
   // All bus positions for map
   const allBusPositions = buses.map((b, index) => ({
@@ -272,9 +288,6 @@ export default function App() {
   
   // Map center - prioritize: bus > origin > default
   const mapCenter = activeBus?.position ? [activeBus.position.lat, activeBus.position.lng] : originPos ?? [51.4545, -2.5879];
-  
-  // Bus to destination line
-  const busToDestLine = activeBus?.position && destPos ? [[activeBus.position.lat, activeBus.position.lng], destPos] : null;
 
   // ===================================================================
   // Render
@@ -390,90 +403,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* STOP-BY-STOP Arrival Times (Like First Bus App) */}
-          {displayStopPredictions.length > 0 && (
-            <div className="bg-bg-card rounded-2xl p-5 border border-border max-h-[400px] overflow-y-auto">
-              <div className="flex items-end justify-between gap-3 mb-3">
-                <div>
-                  <p className="text-xs uppercase tracking-widest text-text-secondary">
-                    {showingLivePredictions ? "Live Arrivals at Stops" : "Scheduled Stop Times"}
-                  </p>
-                  <p className="text-xs text-text-secondary mt-1">
-                    {showingLivePredictions
-                      ? "Select a live bus to inspect its stop-by-stop arrivals."
-                      : "No live Route 72 bus is active right now, so timetable stop times are shown."}
-                  </p>
-                  {(activeServiceTime || activeDelay != null) && (
-                    <p className="text-xs text-text-secondary mt-1">
-                      {activeServiceTime ? `Service ${activeServiceTime}` : "Service time unavailable"}
-                      {activeDelay != null ? ` • ${Math.round(activeDelay)} min ${activeDelay > 0 ? "late" : activeDelay < 0 ? "early" : "on time"}` : ""}
-                    </p>
-                  )}
-                </div>
-                {showingLivePredictions && buses.length > 1 && (
-                  <select
-                    value={selectedBusKey}
-                    onChange={(e) => setSelectedBusKey(e.target.value)}
-                    className="bg-bg-card border border-border text-text-primary rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer max-w-[230px]"
-                  >
-                    {buses.map((bus, idx) => {
-                      const key = getBusKey(bus, idx);
-                      return (
-                        <option key={key} value={key}>
-                          {getBusLabel(bus, idx)}
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-              </div>
-              <div className="space-y-2">
-                {displayStopPredictions.slice(0, 10).map((stop, idx) => (
-                  <div 
-                    key={stop.stop_id || idx} 
-                    className={`flex items-center justify-between p-2 rounded-lg ${
-                      stop.status === 'current' ? 'bg-accent/20 border border-accent' : 
-                      stop.status === 'departed' ? 'opacity-50' :
-                      stop.status === 'scheduled' ? 'bg-white/5 border border-border/60' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${
-                        stop.status === 'current' ? 'bg-accent animate-pulse' : 
-                        stop.status === 'departed' ? 'bg-text-secondary' :
-                        stop.status === 'scheduled' ? 'bg-warning' : 'bg-success'
-                      }`}></span>
-                      <div>
-                        <p className="text-sm font-medium">{stop.stop_name}</p>
-                        <p className="text-xs text-text-secondary">
-                          {stop.status === 'current' ? 'Current location' : 
-                           stop.status === 'departed' ? 'Departed' :
-                           stop.status === 'scheduled' ? 'Scheduled service' : 'Upcoming'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold">{stop.predicted_arrival || stop.scheduled_arrival || "--"}</p>
-                      {stop.delay_text && (
-                        <p className={`text-xs ${
-                          stop.delay_minutes > 0 ? 'text-danger' :
-                          stop.delay_minutes < 0 ? 'text-success' : 'text-text-secondary'
-                        }`}>
-                          {stop.delay_text}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {displayStopPredictions.length > 10 && (
-                  <p className="text-xs text-text-secondary text-center pt-2">
-                    +{displayStopPredictions.length - 10} more stops
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Passengers Card */}
           <div className="bg-bg-card rounded-2xl p-5 border border-border">
             <p className="text-xs uppercase tracking-widest text-text-secondary mb-1">
@@ -558,17 +487,6 @@ export default function App() {
               />
             )}
 
-            {/* Bus to destination line */}
-            {busToDestLine && (
-              <Polyline
-                positions={busToDestLine}
-                color="#ef4444"
-                weight={3}
-                opacity={0.6}
-                dashArray="5, 10"
-              />
-            )}
-
             {/* Origin marker */}
             {originPos && (
               <Marker position={originPos} icon={originIcon}>
@@ -614,17 +532,48 @@ export default function App() {
 
             {/* Stop markers */}
             {stops.map((stop, stopIdx) => (
-              stop.stop?.lat && stop.stop?.lng && (
-                <Marker
-                  key={stop.stop?.stop_id || `stop-${stopIdx}`}
-                  position={[stop.stop.lat, stop.stop.lng]}
-                  icon={stopIcon}
-                >
-                  <Popup>
-                    <strong>Stop {stop.sequence + 1}:</strong> {stop.stop.stop_name}
-                  </Popup>
-                </Marker>
-              )
+              stop.stop?.lat && stop.stop?.lng && (() => {
+                const stopPrediction = getStopPrediction(stop);
+                const arrivalTime =
+                  stopPrediction?.predicted_arrival ||
+                  stopPrediction?.scheduled_arrival ||
+                  stop.scheduled_arrival ||
+                  "--";
+                const delayText =
+                  stopPrediction?.delay_text ||
+                  (!showingLivePredictions && stop.scheduled_arrival ? "Scheduled service" : "No live prediction yet");
+
+                return (
+                  <Marker
+                    key={stop.stop?.stop_id || `stop-${stopIdx}`}
+                    position={[stop.stop.lat, stop.stop.lng]}
+                    icon={stopIcon}
+                  >
+                    <Popup>
+                      <div className="min-w-[190px] text-sm">
+                        <p className="font-semibold">{stop.stop.stop_name}</p>
+                        <p className="text-xs text-slate-500">Stop {stop.sequence + 1}</p>
+                        <div className="mt-2 space-y-1">
+                          <p>
+                            <strong>Arrival:</strong> {arrivalTime}
+                          </p>
+                          <p>
+                            <strong>Status:</strong> {getStopStatusLabel(stopPrediction?.status)}
+                          </p>
+                          {activeServiceTime && (
+                            <p>
+                              <strong>Service:</strong> {activeServiceTime}
+                            </p>
+                          )}
+                          <p>
+                            <strong>Delay:</strong> {delayText}
+                          </p>
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })()
             ))}
           </MapContainer>
         </div>
