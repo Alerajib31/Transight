@@ -1,0 +1,494 @@
+{
+  "outbound": [
+    {
+      "stop_id": "0100BRP90312",
+      "stop_name": "Temple Meads Stn",
+      "lat": 51.44898,
+      "lng": -2.58262,
+      "arrival_time": "06:02:00",
+      "sequence": 0
+    },
+    {
+      "stop_id": "0100BRP90320",
+      "stop_name": "Temple Way",
+      "lat": 51.45146,
+      "lng": -2.58474,
+      "arrival_time": "06:03:00",
+      "sequence": 0
+    },
+    {
+      "stop_id": "0100BRA10792",
+      "stop_name": "Bristol Bridge",
+      "lat": 51.45295,
+      "lng": -2.58994,
+      "arrival_time": "06:04:00",
+      "sequence": 1
+    },
+    {
+      "stop_id": "0100BRP90396",
+      "stop_name": "Union Street",
+      "lat": 51.45754,
+      "lng": -2.59184,
+      "arrival_time": "06:07:00",
+      "sequence": 2
+    },
+    {
+      "stop_id": "0100BRP90371",
+      "stop_name": "The Centre",
+      "lat": 51.45386,
+      "lng": -2.59758,
+      "arrival_time": "06:09:00",
+      "sequence": 3
+    },
+    {
+      "stop_id": "0100BRP90327",
+      "stop_name": "College Green",
+      "lat": 51.45301,
+      "lng": -2.60086,
+      "arrival_time": "06:10:00",
+      "sequence": 4
+    },
+    {
+      "stop_id": "0100BRP90231",
+      "stop_name": "Park Street Top",
+      "lat": 51.45591,
+      "lng": -2.60518,
+      "arrival_time": "06:12:00",
+      "sequence": 5
+    },
+    {
+      "stop_id": "0100BRP90233",
+      "stop_name": "Triangle West",
+      "lat": 51.45652,
+      "lng": -2.60802,
+      "arrival_time": "06:12:00",
+      "sequence": 6
+    },
+    {
+      "stop_id": "0100BRP90997",
+      "stop_name": "Queen's Avenue",
+      "lat": 51.45778,
+      "lng": -2.6081,
+      "arrival_time": "06:13:00",
+      "sequence": 7
+    },
+    {
+      "stop_id": "010000037",
+      "stop_name": "Tyndall Avenue",
+      "lat": 51.45899,
+      "lng": -2.60276,
+      "arrival_time": "06:15:00",
+      "sequence": 8
+    },
+    {
+      "stop_id": "0100053250",
+      "stop_name": "Myrtle Road",
+      "lat": 51.45974,
+      "lng": -2.60111,
+      "arrival_time": "06:16:00",
+      "sequence": 9
+    },
+    {
+      "stop_id": "0100BRP92015",
+      "stop_name": "Cotham Hill",
+      "lat": 51.46239,
+      "lng": -2.60266,
+      "arrival_time": "06:18:00",
+      "sequence": 10
+    },
+    {
+      "stop_id": "0100BRP92018",
+      "stop_name": "Cotham Side",
+      "lat": 51.46408,
+      "lng": -2.59673,
+      "arrival_time": "06:19:00",
+      "sequence": 11
+    },
+    {
+      "stop_id": "0100053252",
+      "stop_name": "Cotham Park",
+      "lat": 51.46589,
+      "lng": -2.59771,
+      "arrival_time": "06:20:00",
+      "sequence": 12
+    },
+    {
+      "stop_id": "0100BRC53367",
+      "stop_name": "Redland Station",
+      "lat": 51.46854,
+      "lng": -2.59954,
+      "arrival_time": "06:21:00",
+      "sequence": 13
+    },
+    {
+      "stop_id": "0100BRP90019",
+      "stop_name": "Zetland Road Junction",
+      "lat": 51.47124,
+      "lng": -2.59294,
+      "arrival_time": "06:23:00",
+      "sequence": 14
+    },
+    {
+      "stop_id": "0100BRP90021",
+      "stop_name": "Sommerville Road",
+      "lat": 51.47492,
+      "lng": -2.59142,
+      "arrival_time": "06:24:00",
+      "sequence": 15
+    },
+    {
+      "stop_id": "0100BRP90026",
+      "stop_name": "Hatherley Road",
+      "lat": 51.47819,
+      "lng": -2.58983,
+      "arrival_time": "06:25:00",
+      "sequence": 16
+    },
+    {
+      "stop_id": "0100BRP90028",
+      "stop_name": "Nevil Road",
+      "lat": 51.48164,
+      "lng": -2.58794,
+      "arrival_time": "06:25:00",
+      "sequence": 17
+    },
+    {
+      "stop_id": "0100BRP90031",
+      "stop_name": "Ashley Down Road",
+      "lat": 51.48409,
+      "lng": -2.58671,
+      "arrival_time": "06:26:00",
+      "sequence": 18
+    },
+    {
+      "stop_id": "0100BRP90033",
+      "stop_name": "Churchways Avenue",
+      "lat": 51.4859,
+      "lng": -2.58589,
+      "arrival_time": "06:27:00",
+      "sequence": 19
+    },
+    {
+      "stop_id": "0100BRP90145",
+      "stop_name": "Memorial Stadium",
+      "lat": 51.48717,
+      "lng": -2.58475,
+      "arrival_time": "06:28:00",
+      "sequence": 20
+    },
+    {
+      "stop_id": "0100BRP90064",
+      "stop_name": "Filton Avenue",
+      "lat": 51.4888,
+      "lng": -2.58149,
+      "arrival_time": "06:29:00",
+      "sequence": 21
+    },
+    {
+      "stop_id": "0100BRA10831",
+      "stop_name": "Horfield Health Centre",
+      "lat": 51.49058,
+      "lng": -2.57756,
+      "arrival_time": "06:30:00",
+      "sequence": 22
+    },
+    {
+      "stop_id": "0100BRP90150",
+      "stop_name": "Turville Drive",
+      "lat": 51.48968,
+      "lng": -2.57338,
+      "arrival_time": "06:31:00",
+      "sequence": 23
+    },
+    {
+      "stop_id": "0100BRP90154",
+      "stop_name": "Landseer Avenue",
+      "lat": 51.48973,
+      "lng": -2.56639,
+      "arrival_time": "06:32:00",
+      "sequence": 24
+    },
+    {
+      "stop_id": "0100BRP90128",
+      "stop_name": "Gainsborough Square",
+      "lat": 51.49071,
+      "lng": -2.56253,
+      "arrival_time": "06:33:00",
+      "sequence": 25
+    },
+    {
+      "stop_id": "010000018",
+      "stop_name": "Hogarth Walk",
+      "lat": 51.4952,
+      "lng": -2.55954,
+      "arrival_time": "06:35:00",
+      "sequence": 26
+    },
+    {
+      "stop_id": "017000042",
+      "stop_name": "The Square",
+      "lat": 51.49697,
+      "lng": -2.55939,
+      "arrival_time": "06:36:00",
+      "sequence": 27
+    },
+    {
+      "stop_id": "017000012",
+      "stop_name": "Wallshut Wood",
+      "lat": 51.49811,
+      "lng": -2.55761,
+      "arrival_time": "06:37:00",
+      "sequence": 28
+    },
+    {
+      "stop_id": "017000014",
+      "stop_name": "Platts Wood",
+      "lat": 51.49819,
+      "lng": -2.55278,
+      "arrival_time": "06:38:00",
+      "sequence": 29
+    },
+    {
+      "stop_id": "0170SGP90682",
+      "stop_name": "Frenchay Campus",
+      "lat": 51.50019,
+      "lng": -2.54622,
+      "arrival_time": "06:41:00",
+      "sequence": 30
+    }
+  ],
+  "inbound": [
+    {
+      "stop_id": "0170SGP90682",
+      "stop_name": "Frenchay Campus",
+      "lat": 51.50019,
+      "lng": -2.54622,
+      "arrival_time": "05:15:00",
+      "sequence": 0
+    },
+    {
+      "stop_id": "017000013",
+      "stop_name": "Platts Wood",
+      "lat": 51.49817,
+      "lng": -2.55251,
+      "arrival_time": "05:18:00",
+      "sequence": 0
+    },
+    {
+      "stop_id": "017000041",
+      "stop_name": "The Square",
+      "lat": 51.49698,
+      "lng": -2.55928,
+      "arrival_time": "05:19:00",
+      "sequence": 1
+    },
+    {
+      "stop_id": "010000017",
+      "stop_name": "Hogarth Walk",
+      "lat": 51.49365,
+      "lng": -2.55997,
+      "arrival_time": "05:20:00",
+      "sequence": 2
+    },
+    {
+      "stop_id": "0100BRP90125",
+      "stop_name": "Cameron Walk",
+      "lat": 51.49029,
+      "lng": -2.56228,
+      "arrival_time": "05:22:00",
+      "sequence": 3
+    },
+    {
+      "stop_id": "0100BRP90153",
+      "stop_name": "Landseer Avenue",
+      "lat": 51.48921,
+      "lng": -2.56823,
+      "arrival_time": "05:23:00",
+      "sequence": 4
+    },
+    {
+      "stop_id": "0100BRP90151",
+      "stop_name": "Turville Drive",
+      "lat": 51.48953,
+      "lng": -2.57313,
+      "arrival_time": "05:24:00",
+      "sequence": 5
+    },
+    {
+      "stop_id": "0100BRP90149",
+      "stop_name": "Horfield Health Centre",
+      "lat": 51.49024,
+      "lng": -2.5766,
+      "arrival_time": "05:25:00",
+      "sequence": 6
+    },
+    {
+      "stop_id": "0100BRP90063",
+      "stop_name": "Lockleaze Road",
+      "lat": 51.49028,
+      "lng": -2.57864,
+      "arrival_time": "05:26:00",
+      "sequence": 7
+    },
+    {
+      "stop_id": "0100BRP90146",
+      "stop_name": "Memorial Stadium",
+      "lat": 51.48776,
+      "lng": -2.58353,
+      "arrival_time": "05:27:00",
+      "sequence": 8
+    },
+    {
+      "stop_id": "0100BRP90032",
+      "stop_name": "Churchways Avenue",
+      "lat": 51.48534,
+      "lng": -2.58604,
+      "arrival_time": "05:28:00",
+      "sequence": 9
+    },
+    {
+      "stop_id": "0100BRP90029",
+      "stop_name": "Ashley Down Road",
+      "lat": 51.48251,
+      "lng": -2.5875,
+      "arrival_time": "05:29:00",
+      "sequence": 10
+    },
+    {
+      "stop_id": "0100BRP90027",
+      "stop_name": "Nevil Road",
+      "lat": 51.47965,
+      "lng": -2.58934,
+      "arrival_time": "05:30:00",
+      "sequence": 11
+    },
+    {
+      "stop_id": "0100BRP90025",
+      "stop_name": "Hatherley Road",
+      "lat": 51.47727,
+      "lng": -2.59008,
+      "arrival_time": "05:31:00",
+      "sequence": 12
+    },
+    {
+      "stop_id": "0100BRP90023",
+      "stop_name": "Sommerville Road",
+      "lat": 51.47324,
+      "lng": -2.59102,
+      "arrival_time": "05:32:00",
+      "sequence": 13
+    },
+    {
+      "stop_id": "0100BRA10879",
+      "stop_name": "Kingsley Road",
+      "lat": 51.46993,
+      "lng": -2.59504,
+      "arrival_time": "05:34:00",
+      "sequence": 14
+    },
+    {
+      "stop_id": "0100BRP92051",
+      "stop_name": "Redland Station",
+      "lat": 51.46763,
+      "lng": -2.59937,
+      "arrival_time": "05:35:00",
+      "sequence": 15
+    },
+    {
+      "stop_id": "0100BRP92014",
+      "stop_name": "Cotham Park",
+      "lat": 51.46613,
+      "lng": -2.59777,
+      "arrival_time": "05:35:00",
+      "sequence": 16
+    },
+    {
+      "stop_id": "0100BRP92019",
+      "stop_name": "Cotham Side",
+      "lat": 51.46382,
+      "lng": -2.59677,
+      "arrival_time": "05:36:00",
+      "sequence": 17
+    },
+    {
+      "stop_id": "0100BRP92016",
+      "stop_name": "Cotham Hill",
+      "lat": 51.46227,
+      "lng": -2.60261,
+      "arrival_time": "05:38:00",
+      "sequence": 18
+    },
+    {
+      "stop_id": "0100BRP92041",
+      "stop_name": "Myrtle Road",
+      "lat": 51.46046,
+      "lng": -2.60129,
+      "arrival_time": "05:39:00",
+      "sequence": 19
+    },
+    {
+      "stop_id": "0100BRP92023",
+      "stop_name": "Elton Road",
+      "lat": 51.45866,
+      "lng": -2.60422,
+      "arrival_time": "05:40:00",
+      "sequence": 20
+    },
+    {
+      "stop_id": "0100BRP90237",
+      "stop_name": "Queen's Road",
+      "lat": 51.45651,
+      "lng": -2.60658,
+      "arrival_time": "05:42:00",
+      "sequence": 21
+    },
+    {
+      "stop_id": "0100BRP90326",
+      "stop_name": "College Green",
+      "lat": 51.45345,
+      "lng": -2.60133,
+      "arrival_time": "05:43:00",
+      "sequence": 22
+    },
+    {
+      "stop_id": "0100BRP90379",
+      "stop_name": "Baldwin Street",
+      "lat": 51.45343,
+      "lng": -2.59521,
+      "arrival_time": "05:46:00",
+      "sequence": 23
+    },
+    {
+      "stop_id": "0100BRP90383",
+      "stop_name": "Baldwin Street",
+      "lat": 51.45371,
+      "lng": -2.59277,
+      "arrival_time": "05:47:00",
+      "sequence": 24
+    },
+    {
+      "stop_id": "0100BRA10793",
+      "stop_name": "Bristol Bridge",
+      "lat": 51.45307,
+      "lng": -2.5899,
+      "arrival_time": "05:48:00",
+      "sequence": 25
+    },
+    {
+      "stop_id": "0100BRA10795",
+      "stop_name": "Victoria Street",
+      "lat": 51.45078,
+      "lng": -2.58644,
+      "arrival_time": "05:49:00",
+      "sequence": 26
+    },
+    {
+      "stop_id": "0100BRP90312",
+      "stop_name": "Temple Meads Stn",
+      "lat": 51.44898,
+      "lng": -2.58262,
+      "arrival_time": "05:52:00",
+      "sequence": 27
+    }
+  ]
+}
