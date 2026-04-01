@@ -54,6 +54,8 @@ GTFS_ZIP_PATH = os.path.join(os.path.dirname(__file__), "..", "itm_south_west_gt
 FUSION_INTERVAL = int(os.getenv("FUSION_INTERVAL", "10"))  # seconds
 LIVE_DATA_MAX_AGE_SECONDS = int(os.getenv("LIVE_DATA_MAX_AGE_SECONDS", "180"))
 ROUTE_PROXIMITY_THRESHOLD_KM = float(os.getenv("ROUTE_PROXIMITY_THRESHOLD_KM", "2.0"))
+LIVE_TRIP_MAX_EARLY_MINUTES = float(os.getenv("LIVE_TRIP_MAX_EARLY_MINUTES", "5"))
+LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25"))
 UK_TZ = ZoneInfo("Europe/London")
 
 _operator_allowlist = [op.strip() for op in os.getenv("BODS_OPERATOR_ALLOWLIST", "FBRI,FBRA").split(",") if op.strip()]
@@ -175,7 +177,59 @@ def is_vehicle_live_for_route(vehicle_data, route):
         return True
 
     distance_km = route_distance_km(route.route_path, vehicle_data["lat"], vehicle_data["lng"])
-    return distance_km <= ROUTE_PROXIMITY_THRESHOLD_KM
+    if distance_km > ROUTE_PROXIMITY_THRESHOLD_KM:
+        return False
+
+    return is_position_plausible_for_timetable(
+        route,
+        vehicle_data["lat"],
+        vehicle_data["lng"],
+        recorded_at,
+    )
+
+
+def is_position_plausible_for_timetable(route, current_lat, current_lng, current_time):
+    """Check whether a live position plausibly matches an in-service GTFS trip."""
+    if route is None or current_lat is None or current_lng is None:
+        return True
+
+    route_stops = sorted(route.route_stops, key=lambda rs: rs.sequence)
+    if not route_stops:
+        return True
+
+    local_time = to_uk_datetime(current_time)
+    current_stop_seq, _, _ = get_current_stop_context(route_stops, current_lat, current_lng)
+    selected_trip = get_gtfs_schedule_trip(
+        route,
+        current_time=local_time,
+        current_stop_seq=current_stop_seq,
+        mode="live",
+    )
+    if not selected_trip:
+        return True
+
+    trip_stops = selected_trip.get("stops", [])
+    if current_stop_seq < 0 or current_stop_seq >= len(trip_stops):
+        return True
+
+    scheduled_dt = build_gtfs_datetime(
+        selected_trip["service_date"],
+        trip_stops[current_stop_seq]["arrival_time"],
+    )
+    if scheduled_dt is None:
+        return True
+
+    scheduled_dt = scheduled_dt.replace(tzinfo=UK_TZ)
+    delta_minutes = (local_time - scheduled_dt).total_seconds() / 60.0
+    if delta_minutes < -LIVE_TRIP_MAX_EARLY_MINUTES or delta_minutes > LIVE_TRIP_MAX_LATE_MINUTES:
+        logger.warning(
+            f"[GTFS] Rejecting implausible live bus for route {route.route_name} "
+            f"({route.direction}) at stop seq {current_stop_seq}: "
+            f"schedule delta {delta_minutes:.1f} min"
+        )
+        return False
+
+    return True
 
 
 def resolve_vehicle_operator(vehicle_data):
@@ -1370,6 +1424,7 @@ def get_route_predictions(route_id):
         or log.bus_lat is None
         or log.bus_lng is None
         or not is_recent_live_timestamp(log.timestamp)
+        or not is_position_plausible_for_timetable(route, log.bus_lat, log.bus_lng, log.timestamp)
     ):
         return jsonify(build_schedule_only_response(route_id, route, current_time=datetime.now(UK_TZ)))
     
@@ -1452,6 +1507,10 @@ def get_status(route_id):
         .order_by(BusLog.timestamp.desc())
         .all()
     )
+    recent_logs = [
+        log for log in recent_logs
+        if is_position_plausible_for_timetable(route, log.bus_lat, log.bus_lng, log.timestamp)
+    ]
     
     # Group by vehicle_id to get unique buses
     buses = {}
