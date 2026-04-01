@@ -15,7 +15,8 @@
       "Bash(python:*)",
       "Bash(where python:*)",
       "Bash(where py:*)",
-      "Bash(py:*)"
+      "Bash(py:*)",
+      "Bash(C:/Users/rajib/AppData/Local/Programs/Python/Python312/Scripts/notebooklm.exe login:*)"
     ]
   }
 }
