@@ -10,11 +10,14 @@ import os
 import cv2
 from ultralytics import YOLO
 
-# Load YOLOv8 model (person detection) - downloads ~6MB on first run
-model = YOLO("yolov8n.pt")
+BASE_DIR = os.path.dirname(__file__)
+MODEL_PATH = os.path.join(BASE_DIR, "server", "yolov8n.pt")
 
 # Path to video file (project root)
-VIDEO_PATH = os.path.join(os.path.dirname(__file__), "bus_queue.mp4")
+VIDEO_PATH = os.path.join(BASE_DIR, "bus_queue.mp4")
+
+# Load the same canonical YOLOv8 model file used by the backend.
+model = YOLO(MODEL_PATH)
 
 # Open video file
 cap = cv2.VideoCapture(VIDEO_PATH)
