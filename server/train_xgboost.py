@@ -136,7 +136,7 @@ if __name__ == "__main__":
     # Train model
     model = train_model(df)
 
-    logger.info("\n✅ Training complete!")
+    logger.info("\nTraining complete!")
     logger.info("Next steps:")
-    logger.info("  1. Update app.py to use model instead of formula")
-    logger.info("  2. Call predict_eta_xgboost() in fusion_engine()")
+    logger.info("  1. Start the backend so it loads the refreshed xgboost_eta_model.joblib")
+    logger.info("  2. Verify /api/status/1 and /api/routes/1/predictions return expected Route 72 data")
