@@ -2,6 +2,10 @@
 
 > Real-Time Digital Twin for Bristol Bus Services.
 
+## Current Release
+
+This repository is frozen at the Route 72 MVP handoff state. The current Flask + React + PostgreSQL stack is the shippable version in this branch. Future architecture work stays in `NEXT_STEPS.md`.
+
 ```
 Transight2/
 ├── dev.nix                 # Nix environment (PostgreSQL, Python, Node, ffmpeg)
@@ -132,7 +136,7 @@ Open **http://localhost:3000** in your browser.
 
 ---
 
-## Phase 3 Roadmap
+## Later Roadmap
 
 - [ ] XGBoost ETA prediction model (replaces math formula)
 - [ ] Historical trend charts
