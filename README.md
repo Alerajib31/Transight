@@ -36,14 +36,30 @@ Transight2/
 
 ## Quick Start
 
-### 1. Database
+### 1. Environment
 
-```bash
-# Create the database (if not using dev.nix)
-createdb transight_db
+Set the runtime variables in your shell before starting Flask. `app.py` reads environment variables directly and does not auto-load `.env`.
+
+```powershell
+$env:DATABASE_URL="postgresql://postgres:R%40jibale3138@localhost:5432/transight_db"
+$env:BODS_API_KEY="your_bods_api_key_here"
+$env:TOMTOM_API_KEY="your_tomtom_traffic_key_here"
+$env:TOMTOM_ROUTING_KEY="your_tomtom_routing_key_here"
+$env:VIDEO_PATH="server/bus_queue.mp4"
+$env:FUSION_INTERVAL="10"
 ```
 
-### 2. Backend
+If you prefer using `.env`, source those values into the shell first or copy them into your terminal session. The backend only sees variables exported into the process environment.
+
+### 2. Database
+
+```bash
+# Create the database if it does not already exist
+cd server
+python setup_db.py
+```
+
+### 3. Backend
 
 ```bash
 cd server
@@ -52,7 +68,7 @@ python seed.py          # Seeds 2 routes
 python app.py           # Starts Flask on :5000 + Fusion Engine
 ```
 
-### 3. Frontend
+### 4. Frontend
 
 ```bash
 cd client
@@ -68,9 +84,10 @@ Open **http://localhost:3000** in your browser.
 
 | Variable         | Default                                              | Purpose                    |
 |------------------|------------------------------------------------------|----------------------------|
-| `DATABASE_URL`   | `postgresql://postgres:postgres@localhost:5432/transight_db` | PostgreSQL connection      |
-| `BODS_API_KEY`   | *(empty — uses dummy GPS)*                           | Bus Open Data Service key  |
-| `TOMTOM_API_KEY` | *(empty — returns 0 delay)*                          | TomTom Traffic API key     |
+| `DATABASE_URL`   | `postgresql://postgres:R%40jibale3138@localhost:5432/transight_db` | PostgreSQL connection      |
+| `BODS_API_KEY`   | required for live GPS, optional for schedule-only fallback | Bus Open Data Service key  |
+| `TOMTOM_API_KEY` | required for live traffic, optional for schedule-only fallback | TomTom Traffic API key     |
+| `TOMTOM_ROUTING_KEY` | required for routing ETA estimates, optional for schedule-only fallback | TomTom Routing API key |
 | `VIDEO_PATH`     | `server/bus_queue.mp4`                               | Simulated camera feed      |
 | `FUSION_INTERVAL`| `10`                                                 | Seconds between cycles     |
 
@@ -81,7 +98,16 @@ Open **http://localhost:3000** in your browser.
 | Endpoint               | Method | Description                          |
 |------------------------|--------|--------------------------------------|
 | `/api/routes`          | GET    | All configured routes (for dropdown) |
+| `/api/routes/<route_id>/stops` | GET | Ordered stops for a route |
+| `/api/routes/<route_id>/predictions` | GET | Stop-by-stop timetable or live predictions |
 | `/api/status/<route_id>` | GET  | Latest fused status for a route      |
+
+---
+
+## Notes
+
+- The backend does not auto-load `.env` in this repo. Export shell variables before running `python app.py`.
+- If the live API keys are missing, the app still starts and falls back to schedule-only behavior where possible.
 
 ---
 
