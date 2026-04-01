@@ -95,7 +95,12 @@ export default function App() {
   const [routes, setRoutes] = useState([]);
   const [selectedRouteId, setSelectedRouteId] = useState(null);
   const [buses, setBuses] = useState([]); // Array of all buses
-  const [routePredictions, setRoutePredictions] = useState([]);
+  const [routePredictions, setRoutePredictions] = useState({
+    stops: [],
+    service_time: null,
+    current_delay: null,
+    is_live: false,
+  });
   const [route, setRoute] = useState(null);
   const [stops, setStops] = useState([]);
   const [selectedBusKey, setSelectedBusKey] = useState("");
@@ -191,10 +196,20 @@ export default function App() {
         return r.json();
       })
       .then((data) => {
-        setRoutePredictions(data.stops || []);
+        setRoutePredictions({
+          stops: data.stops || [],
+          service_time: data.service_time ?? null,
+          current_delay: data.current_delay ?? null,
+          is_live: Boolean(data.is_live),
+        });
       })
       .catch(() => {
-        setRoutePredictions([]);
+        setRoutePredictions({
+          stops: [],
+          service_time: null,
+          current_delay: null,
+          is_live: false,
+        });
       });
   }, [selectedRouteId]);
 
@@ -216,23 +231,24 @@ export default function App() {
 
 
   /* ── Derived values ────────────────────────────────────────────── */
-  // Use first bus for main display, or show multi-bus info
-  const primaryBus = buses.length > 0 ? buses[0] : null;
-  const eta = primaryBus?.eta ?? "--";
-  const passengers = primaryBus?.passenger_count ?? 0;
-  const highDemand = passengers > 15;
-  
   const originName = route?.origin_name ?? "—";
   const destName = route?.destination_name ?? "—";
+  const selectedBusIndex = buses.findIndex((bus, index) => getBusKey(bus, index) === selectedBusKey);
   const selectedBus =
-    buses.find((bus, index) => getBusKey(bus, index) === selectedBusKey) ||
+    (selectedBusIndex >= 0 ? buses[selectedBusIndex] : null) ||
     buses[0] ||
     null;
+  const activeBus = selectedBus;
+  const eta = activeBus?.eta ?? "--";
+  const passengers = activeBus?.passenger_count ?? 0;
+  const highDemand = passengers > 15;
+  const activeDelay = activeBus?.delay_minutes ?? routePredictions.current_delay;
+  const activeServiceTime = activeBus?.scheduled_service_time ?? routePredictions.service_time;
   const displayStopPredictions =
-    selectedBus?.stop_predictions?.length > 0
-      ? selectedBus.stop_predictions
-      : routePredictions;
-  const showingLivePredictions = selectedBus?.stop_predictions?.length > 0;
+    activeBus?.stop_predictions?.length > 0
+      ? activeBus.stop_predictions
+      : routePredictions.stops;
+  const showingLivePredictions = activeBus?.stop_predictions?.length > 0;
   
   // All bus positions for map
   const allBusPositions = buses.map((b, index) => ({
@@ -255,10 +271,10 @@ export default function App() {
   const routePath = route?.route_path || [];
   
   // Map center - prioritize: bus > origin > default
-  const mapCenter = primaryBus?.position ? [primaryBus.position.lat, primaryBus.position.lng] : originPos ?? [51.4545, -2.5879];
+  const mapCenter = activeBus?.position ? [activeBus.position.lat, activeBus.position.lng] : originPos ?? [51.4545, -2.5879];
   
   // Bus to destination line
-  const busToDestLine = primaryBus?.position && destPos ? [[primaryBus.position.lat, primaryBus.position.lng], destPos] : null;
+  const busToDestLine = activeBus?.position && destPos ? [[activeBus.position.lat, activeBus.position.lng], destPos] : null;
 
   // ===================================================================
   // Render
@@ -330,6 +346,11 @@ export default function App() {
             <p className="text-lg font-semibold text-white mb-2">
               {destName}
             </p>
+            {activeBus && (
+              <p className="text-xs text-text-secondary mb-3">
+                Showing live data for {getBusLabel(activeBus, selectedBusIndex >= 0 ? selectedBusIndex : 0)}
+              </p>
+            )}
             
             {/* Show all buses' ETAs */}
             {buses.length > 0 ? (
@@ -344,6 +365,9 @@ export default function App() {
                       {typeof bus.eta === "number" ? bus.eta : "--"}
                     </p>
                     <p className="text-xs text-text-secondary">minutes to destination</p>
+                    {bus.scheduled_service_time && (
+                      <p className="text-xs text-text-secondary">Service {bus.scheduled_service_time}</p>
+                    )}
                     {bus.delay_minutes > 0 && (
                       <p className="text-xs text-danger">{Math.round(bus.delay_minutes)} min late</p>
                     )}
@@ -379,6 +403,12 @@ export default function App() {
                       ? "Select a live bus to inspect its stop-by-stop arrivals."
                       : "No live Route 72 bus is active right now, so timetable stop times are shown."}
                   </p>
+                  {(activeServiceTime || activeDelay != null) && (
+                    <p className="text-xs text-text-secondary mt-1">
+                      {activeServiceTime ? `Service ${activeServiceTime}` : "Service time unavailable"}
+                      {activeDelay != null ? ` • ${Math.round(activeDelay)} min ${activeDelay > 0 ? "late" : activeDelay < 0 ? "early" : "on time"}` : ""}
+                    </p>
+                  )}
                 </div>
                 {showingLivePredictions && buses.length > 1 && (
                   <select
@@ -451,7 +481,7 @@ export default function App() {
             </p>
             <p className="text-3xl font-bold">{passengers}</p>
             <p className="text-xs text-text-secondary mt-1">
-              Detected from video feed at bus stop
+              {activeBus ? "Detected for the selected live bus context" : "Detected from video feed when a live bus is active"}
             </p>
             {highDemand && (
               <div className="mt-3 flex items-center gap-2 bg-warning/10 text-warning rounded-lg px-3 py-2 text-sm font-medium">
@@ -466,8 +496,8 @@ export default function App() {
               Traffic Delay
             </p>
             <p className="text-2xl font-bold">
-              {primaryBus?.traffic_delay != null
-                ? `${Math.round(primaryBus.traffic_delay)}s`
+              {activeBus?.traffic_delay != null
+                ? `${Math.round(activeBus.traffic_delay)}s`
                 : "—"}
             </p>
             <p className="text-xs text-text-secondary mt-1">
@@ -476,13 +506,13 @@ export default function App() {
           </div>
 
           {/* Bus Position Card */}
-          {primaryBus?.position && (
+          {activeBus?.position && (
             <div className="bg-bg-card rounded-2xl p-5 border border-border">
               <p className="text-xs uppercase tracking-widest text-text-secondary mb-1">
                 Current Bus Position
               </p>
               <p className="text-sm font-mono">
-                {primaryBus.position.lat.toFixed(6)}, {primaryBus.position.lng.toFixed(6)}
+                {activeBus.position.lat.toFixed(6)}, {activeBus.position.lng.toFixed(6)}
               </p>
               <p className="text-xs text-text-secondary mt-1">
                 From BODS Real-time Feed
