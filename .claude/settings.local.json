@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:/Users/rajib/AppData/Roaming/npm/codex.cmd\" --version)",
+      "Bash(export PATH=\"$PATH:/c/Users/rajib/AppData/Roaming/npm\")",
+      "Bash(codex --version)",
+      "Bash(setx PATH:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}
