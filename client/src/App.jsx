@@ -24,19 +24,29 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-/* ── Custom icons ──────────────────────────────────────────────────── */
-const busIcon = new L.DivIcon({
-  className: "bus-marker",
-  html: `<div style="
-    width:32px;height:32px;border-radius:50%;
-    background:linear-gradient(135deg,#2563eb,#1d4ed8);
-    border:3px solid #fff;box-shadow:0 0 16px rgba(37,99,235,.7);
-    display:flex;align-items:center;justify-content:center;
-    font-size:16px;animation:pulse 2s infinite;
-  ">🚌</div>`,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-});
+/* ── Bus marker helpers ────────────────────────────────────────────── */
+function getBusMarkerColors(delayMinutes) {
+  if (delayMinutes == null) return { bg: '#2563eb,#1d4ed8', glow: 'rgba(37,99,235,.7)' };
+  if (delayMinutes <= 1) return { bg: '#10b981,#059669', glow: 'rgba(16,185,129,.7)' };
+  if (delayMinutes <= 5) return { bg: '#f59e0b,#d97706', glow: 'rgba(245,158,11,.7)' };
+  return { bg: '#ef4444,#dc2626', glow: 'rgba(239,68,68,.7)' };
+}
+
+function createBusIcon(delayMinutes) {
+  const { bg, glow } = getBusMarkerColors(delayMinutes);
+  return new L.DivIcon({
+    className: "bus-marker",
+    html: `<div style="
+      width:32px;height:32px;border-radius:50%;
+      background:linear-gradient(135deg,${bg});
+      border:3px solid #fff;box-shadow:0 0 16px ${glow};
+      display:flex;align-items:center;justify-content:center;
+      font-size:16px;animation:pulse 2s infinite;
+    ">🚌</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+}
 
 const originIcon = new L.DivIcon({
   className: "",
@@ -92,6 +102,31 @@ function getBusLabel(bus, index = 0) {
 // Component: App
 // =====================================================================
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("transight-theme");
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {}
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("transight-theme", theme); } catch {}
+  }, [theme]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e) => {
+      try { if (localStorage.getItem("transight-theme")) return; } catch {}
+      setTheme(e.matches ? "dark" : "light");
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const toggleTheme = () => setTheme((t) => t === "dark" ? "light" : "dark");
+
   const [routes, setRoutes] = useState([]);
   const [selectedRouteId, setSelectedRouteId] = useState(null);
   const [buses, setBuses] = useState([]); // Array of all buses
@@ -274,6 +309,7 @@ export default function App() {
     position: [b.position.lat, b.position.lng],
     eta: b.eta,
     passengers: b.passenger_count,
+    delay_minutes: b.delay_minutes,
   }));
   
   const originPos = route?.origin_lat && route?.origin_lng
@@ -295,7 +331,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* ── Header ────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-card/60 backdrop-blur-lg sticky top-0 z-50">
+      <header className={`flex items-center justify-between px-6 py-4 border-b border-border backdrop-blur-lg sticky top-0 z-50 ${theme === "light" ? "bg-white/80 shadow-sm" : "bg-bg-card/60"}`}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-blue-400 flex items-center justify-center text-xl shadow-lg shadow-accent/20">
             🚍
@@ -310,7 +346,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Route Selector */}
+        {/* Route Selector + Theme Toggle */}
         <div className="flex items-center gap-2">
           <label htmlFor="route-select" className="text-sm text-text-secondary hidden sm:inline">
             Route:
@@ -327,6 +363,13 @@ export default function App() {
               </option>
             ))}
           </select>
+          <button
+            onClick={toggleTheme}
+            className="w-9 h-9 flex items-center justify-center rounded-lg border border-border bg-bg-card hover:bg-bg-card-hover transition-colors cursor-pointer text-text-primary"
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? "\u2600\uFE0F" : "\uD83C\uDF19"}
+          </button>
         </div>
       </header>
 
@@ -356,7 +399,7 @@ export default function App() {
             <p className="text-xs uppercase tracking-widest text-text-secondary mb-1">
               {buses.length > 1 ? `${buses.length} Buses En Route` : 'Bus Arrives At'}
             </p>
-            <p className="text-lg font-semibold text-white mb-2">
+            <p className="text-lg font-semibold text-text-primary mb-2">
               {destName}
             </p>
             {activeBus && (
@@ -463,24 +506,28 @@ export default function App() {
         </div>
 
         {/* RIGHT COLUMN: Map */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-border overflow-hidden min-h-[500px] shadow-lg">
+        <div className="lg:col-span-2 bg-bg-card rounded-2xl border border-border overflow-hidden min-h-[500px] shadow-lg">
           <MapContainer
             center={mapCenter}
             zoom={13}
             className="w-full h-full min-h-[500px] lg:min-h-0"
             style={{ height: "100%" }}
           >
-            {/* Light theme map tiles */}
+            {/* Themed map tiles */}
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              key={theme}
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              url={theme === "dark"
+                ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              }
             />
 
             {/* Route path polyline */}
             {routePath.length > 0 && (
               <Polyline
                 positions={routePath}
-                color="#3b82f6"
+                color={theme === "dark" ? "#3b82f6" : "#1d4ed8"}
                 weight={4}
                 opacity={0.7}
                 dashArray="10, 10"
@@ -509,10 +556,10 @@ export default function App() {
 
             {/* Bus markers - show ALL buses */}
             {allBusPositions.map((bus, index) => (
-              <Marker 
+              <Marker
                 key={bus.key}
-                position={bus.position} 
-                icon={busIcon}
+                position={bus.position}
+                icon={createBusIcon(bus.delay_minutes)}
               >
                 <Popup>
                   🚌 <strong>Bus {route?.route_name} #{index + 1}</strong>

@@ -7,7 +7,9 @@
       "Bash(setx PATH:*)",
       "Bash(npm install:*)",
       "Bash(export PATH=\"/c/Users/rajib/AppData/Roaming/npm:$PATH\")",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python app.py)",
+      "Bash(npm run:*)"
     ]
   }
 }
