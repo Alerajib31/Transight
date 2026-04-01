@@ -281,6 +281,34 @@ def predict_eta_xgboost(route, passenger_count, traffic_delay_seconds, current_s
         return None
 
 
+def resolve_live_eta(route, log, current_stop_seq, remaining_stops):
+    """Resolve the best ETA for a live bus using model first, then formula fallback."""
+    current_eta = log.predicted_eta
+
+    if current_eta is not None:
+        return current_eta
+
+    if log.bus_lat is None or log.bus_lng is None:
+        return None
+
+    current_eta = predict_eta_xgboost(
+        route=route,
+        passenger_count=log.passenger_count or 0,
+        traffic_delay_seconds=log.traffic_delay or 0,
+        current_stop_seq=current_stop_seq,
+        remaining_stops=remaining_stops,
+        current_time=log.timestamp or datetime.now(),
+    )
+    if current_eta is not None:
+        return current_eta
+
+    return calculate_eta(
+        haversine(log.bus_lat, log.bus_lng, route.dest_lat, route.dest_lng),
+        log.traffic_delay or 0,
+        log.passenger_count or 0,
+    )
+
+
 def calculate_route_delay(route, current_stop_seq, eta_min):
     """Estimate route delay versus timetable using route progress."""
     if route is None or eta_min is None:
@@ -1346,23 +1374,8 @@ def get_route_predictions(route_id):
         return jsonify(build_schedule_only_response(route_id, route, current_time=datetime.now(UK_TZ)))
     
     # Calculate stop-by-step predictions
-    current_eta = log.predicted_eta
     remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
-    if current_eta is None and log.bus_lat is not None and log.bus_lng is not None:
-        current_eta = predict_eta_xgboost(
-            route=route,
-            passenger_count=log.passenger_count or 0,
-            traffic_delay_seconds=log.traffic_delay or 0,
-            current_stop_seq=current_stop_seq,
-            remaining_stops=remaining_stops,
-            current_time=log.timestamp or datetime.now(),
-        )
-        if current_eta is None:
-            current_eta = calculate_eta(
-                haversine(log.bus_lat, log.bus_lng, route.dest_lat, route.dest_lng),
-                log.traffic_delay or 0,
-                log.passenger_count or 0,
-            )
+    current_eta = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
 
     stop_predictions = calculate_stop_predictions(
         route_id, log.bus_lat, log.bus_lng, current_eta, log.timestamp
@@ -1452,13 +1465,14 @@ def get_status(route_id):
     for vehicle_id, log in buses.items():
         # Calculate remaining stops
         remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
+        current_eta = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
         delay_minutes = log.delay_minutes
         if delay_minutes is None:
-            delay_minutes = calculate_route_delay(route, current_stop_seq, log.predicted_eta)
+            delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
         
         # Calculate predictions
         stop_predictions = calculate_stop_predictions(
-            route_id, log.bus_lat, log.bus_lng, log.predicted_eta, log.timestamp
+            route_id, log.bus_lat, log.bus_lng, current_eta, log.timestamp
         )
 
         operator = _latest_bus_metadata.get(vehicle_id, {}).get("operator")
@@ -1472,7 +1486,7 @@ def get_status(route_id):
                 "lat": log.bus_lat,
                 "lng": log.bus_lng,
             },
-            "eta": log.predicted_eta,
+            "eta": current_eta,
             "passenger_count": log.passenger_count,
             "traffic_delay": log.traffic_delay,
             "scheduled_service_time": log.scheduled_service_time,
