@@ -3,6 +3,8 @@ Train XGBoost model for ETA prediction using historical BusLog data.
 Run: python train_xgboost.py
 """
 
+import argparse
+import json
 import os
 import pandas as pd
 import xgboost as xgb
@@ -17,6 +19,7 @@ from models import BusLog, RouteStop
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("transight")
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "xgboost_eta_model.joblib")
+DEFAULT_METRICS_PATH = os.path.join(os.path.dirname(__file__), "xgboost_eta_metrics.json")
 FEATURE_COLUMNS = [
     "passenger_count",
     "traffic_delay",
@@ -75,7 +78,7 @@ def collect_training_data():
         return df
 
 
-def train_model(df):
+def train_model(df, metrics_path=None):
     """Train XGBoost regression model."""
 
     # Features
@@ -120,10 +123,38 @@ def train_model(df):
     joblib.dump(model, MODEL_PATH)
     logger.info(f"\nModel saved to {MODEL_PATH}")
 
-    return model
+    metrics = {
+        "training_samples": len(X_train),
+        "test_samples": len(X_test),
+        "mae_minutes": round(float(mae), 4),
+        "rmse_minutes": round(float(rmse), 4),
+        "feature_columns": FEATURE_COLUMNS,
+        "feature_importance": {
+            feat: round(float(imp), 6)
+            for feat, imp in zip(FEATURE_COLUMNS, model.feature_importances_)
+        },
+        "model_path": MODEL_PATH,
+    }
+
+    if metrics_path:
+        with open(metrics_path, "w", encoding="utf-8") as handle:
+            json.dump(metrics, handle, indent=2)
+        logger.info(f"Evaluation metadata saved to {metrics_path}")
+
+    return model, metrics
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train the Route 72 XGBoost ETA model.")
+    parser.add_argument(
+        "--metrics-json",
+        nargs="?",
+        const=DEFAULT_METRICS_PATH,
+        default=None,
+        help="Optionally save evaluation metadata to JSON. If no path is provided, uses server/xgboost_eta_metrics.json.",
+    )
+    args = parser.parse_args()
+
     logger.info("=== XGBoost ETA Model Training ===\n")
 
     # Collect data
@@ -134,7 +165,7 @@ if __name__ == "__main__":
         exit(1)
 
     # Train model
-    model = train_model(df)
+    model, metrics = train_model(df, metrics_path=args.metrics_json)
 
     logger.info("\nTraining complete!")
     logger.info("Next steps:")

@@ -1,0 +1,27 @@
+{
+  "training_samples": 8000,
+  "test_samples": 2000,
+  "mae_minutes": 2.4956,
+  "rmse_minutes": 3.2613,
+  "feature_columns": [
+    "passenger_count",
+    "traffic_delay",
+    "hour",
+    "day_of_week",
+    "current_stop_sequence",
+    "remaining_stops",
+    "total_stops",
+    "progress_ratio"
+  ],
+  "feature_importance": {
+    "passenger_count": 0.003847,
+    "traffic_delay": 0.003854,
+    "hour": 0.00087,
+    "day_of_week": 0.000777,
+    "current_stop_sequence": 0.00129,
+    "remaining_stops": 0.259195,
+    "total_stops": 0.000745,
+    "progress_ratio": 0.729423
+  },
+  "model_path": "C:\\Users\\rajib\\Downloads\\Transight2\\server\\xgboost_eta_model.joblib"
+}
