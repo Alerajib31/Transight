@@ -11,7 +11,7 @@ client/.env
 client/.env.*
 !.env.example
 AGENTS.md
-CLAUDE.md
+!CLAUDE.md
 NEXT_STEPS.md
 DATA_FLOW.md
 INSTALL.md
@@ -23,7 +23,7 @@ SYSTEM_OVERVIEW.md
 .vscode/
 docs/superpowers/specs/
 .tools/
-
+!.planning/
 .agent
 .codebuddy
 .continue

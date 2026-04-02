@@ -66,25 +66,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | — | Pending |
-| DATA-02 | — | Pending |
-| DATA-03 | — | Pending |
-| DATA-04 | — | Pending |
-| LIVE-01 | — | Pending |
-| LIVE-02 | — | Pending |
-| LIVE-03 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
-| UI-04 | — | Pending |
-| UI-05 | — | Pending |
-| UI-06 | — | Pending |
+| DATA-01 | Phase 1 | Pending |
+| DATA-02 | Phase 1 | Pending |
+| DATA-03 | Phase 1 | Pending |
+| DATA-04 | Phase 1 | Pending |
+| LIVE-01 | Phase 1 | Pending |
+| LIVE-02 | Phase 1 | Pending |
+| LIVE-03 | Phase 2 | Pending |
+| UI-01 | Phase 2 | Pending |
+| UI-02 | Phase 2 | Pending |
+| UI-03 | Phase 2 | Pending |
+| UI-04 | Phase 2 | Pending |
+| UI-05 | Phase 2 | Pending |
+| UI-06 | Phase 2 | Pending |
 
 **Coverage:**
 - v1 requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13
+- Mapped to phases: 13
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-02*
-*Last updated: 2026-04-02 after initial definition*
+*Last updated: 2026-04-02 after roadmap creation*
