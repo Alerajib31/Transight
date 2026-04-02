@@ -62,10 +62,7 @@ LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25")
 UK_TZ = ZoneInfo("Europe/London")
 
 _operator_allowlist = [op.strip() for op in os.getenv("BODS_OPERATOR_ALLOWLIST", "FBRI,FBRA").split(",") if op.strip()]
-if len(_operator_allowlist) >= 2:
-    BODS_OPERATOR_ALLOWLIST = tuple(dict.fromkeys(_operator_allowlist))[:2]
-else:
-    BODS_OPERATOR_ALLOWLIST = ("FBRI", "FBRA")
+BODS_OPERATOR_ALLOWLIST = tuple(dict.fromkeys(_operator_allowlist)) if _operator_allowlist else ("FBRI", "FBRA")
 
 # Bristol operator code (First Bristol = FBRI)
 BODS_OPERATOR = BODS_OPERATOR_ALLOWLIST[0]
@@ -513,23 +510,50 @@ def get_smoothed_crowd_count(vehicle_id, current_count):
     return round(avg_count)
 
 
-def is_near_major_stop(bus_lat, bus_lng, direction):
+def is_near_major_stop(bus_lat: float, bus_lng: float, route) -> tuple:
     """
     Check if bus is near a major stop where crowd detection should be applied.
-    
-    Returns: (is_near_major_stop, nearest_stop_name)
+    Uses the route's actual stops from the database. Falls back to hardcoded
+    Route 72 constants if the route has no database stops loaded yet.
+
+    Args:
+        bus_lat: Current bus latitude.
+        bus_lng: Current bus longitude.
+        route:   SQLAlchemy Route object (has .route_name, .direction, .route_stops).
+
+    Returns:
+        Tuple of (is_near: bool, nearest_stop_name: str, distance_km: float)
     """
-    major_stops = MAJOR_STOPS_OUTBOUND if direction == 'outbound' else MAJOR_STOPS_INBOUND
-    
+    # Build candidate major stop list from database RouteStop records for this route.
+    # Use all stops in the route as candidates (crowd detection checks proximity anyway).
+    candidate_stops = []
+    try:
+        for rs in route.route_stops:
+            if rs.stop and rs.stop.lat is not None and rs.stop.lng is not None:
+                candidate_stops.append((rs.stop.stop_name, rs.stop.lat, rs.stop.lng))
+    except Exception:
+        candidate_stops = []
+
+    # Fall back to hardcoded Route 72 constants when DB stops unavailable
+    if not candidate_stops:
+        direction = getattr(route, 'direction', 'outbound')
+        candidate_stops = (
+            MAJOR_STOPS_OUTBOUND if direction == 'outbound' else MAJOR_STOPS_INBOUND
+        )
+        logger.debug(
+            f"[Crowd] is_near_major_stop: no DB stops for {route.route_name} "
+            f"({route.direction}); using hardcoded fallback"
+        )
+
     min_dist = float('inf')
     nearest_stop = None
-    
-    for stop_name, stop_lat, stop_lng in major_stops:
+
+    for stop_name, stop_lat, stop_lng in candidate_stops:
         dist = haversine(bus_lat, bus_lng, stop_lat, stop_lng)
         if dist < min_dist:
             min_dist = dist
             nearest_stop = stop_name
-    
+
     is_near = min_dist <= CROWD_DETECTION_RADIUS_KM
     return is_near, nearest_stop, min_dist
 
@@ -684,79 +708,120 @@ def get_route_distance_tomtom(origin_lat, origin_lng, dest_lat, dest_lng):
 # =========================================================================
 # BODS Real-Time Bus Fetcher
 # =========================================================================
-def fetch_all_buses_for_route(route):
+def fetch_all_buses_for_route(route, all_vehicles: list | None = None):
     """
     Fetch ALL buses for a given route from BODS.
-    
+
+    When all_vehicles is provided (bulk-fetch path), filters the pre-fetched list
+    by line_ref for this route instead of making a new BODS HTTP request.
+
     Returns: List of vehicle data dicts, or empty list if no buses
     """
     route_name = route.route_name
     direction = route.direction
 
-    if not BODS_API_KEY:
-        logger.warning("[BODS] API key not set — no live bus data available")
-        return []
-
-    try:
-        # Fetch vehicles for this route and filter to the configured operators locally.
-        vehicles = fetch_bods_vehicles(
-            api_key=BODS_API_KEY,
-            line_ref=route_name,
-        )
-        
+    if all_vehicles is not None:
+        # Bulk-fetch path: filter the pre-fetched list by line_ref for this route
+        vehicles = [v for v in all_vehicles if (v.get("line") or "").strip() == route_name]
+        if not vehicles:
+            logger.info(f"[BODS] No vehicles for route {route_name} in bulk result")
+            return []
+        logger.info(f"[BODS] {len(vehicles)} vehicle(s) for {route_name} after line filter")
+    else:
+        # Legacy path: individual BODS call (used when all_vehicles not supplied)
+        if not BODS_API_KEY:
+            logger.warning("[BODS] API key not set — no live bus data available")
+            return []
+        try:
+            vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY, line_ref=route_name)
+        except Exception as exc:
+            logger.error(f"[BODS] Fetch error: {exc}")
+            return []
         if not vehicles:
             logger.warning(f"[BODS] No vehicles found for route {route_name}")
             return []
-        
         logger.info(f"[BODS] Found {len(vehicles)} vehicle(s) for route {route_name}")
-        logger.info(f"[BODS] Operator allowlist: {', '.join(BODS_OPERATOR_ALLOWLIST)}")
+    logger.info(f"[BODS] Operator allowlist: {', '.join(BODS_OPERATOR_ALLOWLIST)}")
 
-        allowed_operators = set(BODS_OPERATOR_ALLOWLIST)
-        vehicles = [
-            v for v in vehicles
-            if resolve_vehicle_operator(v) in allowed_operators
-        ]
+    allowed_operators = set(BODS_OPERATOR_ALLOWLIST)
+    vehicles = [
+        v for v in vehicles
+        if resolve_vehicle_operator(v) in allowed_operators
+    ]
 
-        if not vehicles:
-            logger.warning(f"[BODS] No vehicles matched operators {', '.join(BODS_OPERATOR_ALLOWLIST)}")
-            return []
+    if not vehicles:
+        logger.warning(f"[BODS] No vehicles matched operators {', '.join(BODS_OPERATOR_ALLOWLIST)}")
+        return []
 
-        vehicles = [
-            v for v in vehicles
-            if is_vehicle_live_for_route(v, route)
-        ]
+    vehicles = [
+        v for v in vehicles
+        if is_vehicle_live_for_route(v, route)
+    ]
 
-        if not vehicles:
-            logger.warning(f"[BODS] No recent Bristol-route vehicles found for route {route_name}")
-            return []
+    if not vehicles:
+        logger.warning(f"[BODS] No recent Bristol-route vehicles found for route {route_name}")
+        return []
 
-        # Filter by direction
-        direction_lower = direction.lower()
-        matching_vehicles = []
-        
-        for v in vehicles:
-            vehicle_direction = (v.get('direction') or '').lower()
-            destination = (v.get('destination') or '').lower()
-            
-            # Check direction match - either by direction field or destination
-            if (direction_lower in vehicle_direction or 
+    # Filter by direction
+    direction_lower = direction.lower()
+    matching_vehicles = []
+
+    for v in vehicles:
+        vehicle_direction = (v.get('direction') or '').lower()
+        destination = (v.get('destination') or '').lower()
+
+        # Check direction match - either by direction field or destination
+        if (direction_lower in vehicle_direction or
                 vehicle_direction == direction_lower or
                 direction_lower in destination):
-                matching_vehicles.append(v)
-        
-        # If no direction match, use all vehicles
-        if not matching_vehicles:
-            matching_vehicles = vehicles
-            logger.warning(f"[BODS] No direction match for {direction}, using all {len(vehicles)} vehicles")
-        
-        logger.info(f"[BODS] Returning {len(matching_vehicles)} matching vehicle(s)")
-        for v in matching_vehicles:
-            logger.info(f"  - Vehicle {v.get('vehicle_id')}: ({v['lat']:.5f}, {v['lng']:.5f}) to {v.get('destination')}")
-        
-        return matching_vehicles
-        
+            matching_vehicles.append(v)
+
+    # If no direction match, use all vehicles
+    if not matching_vehicles:
+        matching_vehicles = vehicles
+        logger.warning(f"[BODS] No direction match for {direction}, using all {len(vehicles)} vehicles")
+
+    logger.info(f"[BODS] Returning {len(matching_vehicles)} matching vehicle(s)")
+    for v in matching_vehicles:
+        logger.info(f"  - Vehicle {v.get('vehicle_id')}: ({v['lat']:.5f}, {v['lng']:.5f}) to {v.get('destination')}")
+
+    return matching_vehicles
+
+
+# ---------------------------------------------------------------------------
+# BODS Bulk Fetch Cache (one call per cycle, shared across all routes)
+# ---------------------------------------------------------------------------
+_bods_bulk_cache: dict = {"vehicles": None, "cycle_id": -1}
+_bods_cycle_counter: int = 0
+
+
+def fetch_bods_vehicles_bulk(cycle_id: int) -> list:
+    """
+    Fetch ALL vehicles for configured operators in ONE BODS call per Fusion cycle.
+    Result is cached by cycle_id so each route in the same cycle reuses it.
+    """
+    global _bods_bulk_cache
+
+    if _bods_bulk_cache["cycle_id"] == cycle_id and _bods_bulk_cache["vehicles"] is not None:
+        logger.info(
+            f"[BODS] Reusing bulk cache (cycle {cycle_id}): "
+            f"{len(_bods_bulk_cache['vehicles'])} vehicles"
+        )
+        return _bods_bulk_cache["vehicles"]
+
+    if not BODS_API_KEY:
+        logger.warning("[BODS] API key not set — no live bus data available")
+        _bods_bulk_cache = {"vehicles": [], "cycle_id": cycle_id}
+        return []
+
+    try:
+        vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY)  # no line_ref = all operators
+        logger.info(f"[BODS] Bulk fetch cycle {cycle_id}: {len(vehicles)} raw vehicles")
+        _bods_bulk_cache = {"vehicles": vehicles, "cycle_id": cycle_id}
+        return vehicles
     except Exception as exc:
-        logger.error(f"[BODS] Fetch error: {exc}")
+        logger.error(f"[BODS] Bulk fetch error: {exc}")
+        _bods_bulk_cache = {"vehicles": [], "cycle_id": cycle_id}
         return []
 
 
@@ -1249,11 +1314,16 @@ def fusion_engine():
                     time.sleep(FUSION_INTERVAL)
                     continue
 
+                # Single BODS call for this entire cycle — fanned out per route below
+                global _bods_cycle_counter
+                _bods_cycle_counter += 1
+                all_vehicles = fetch_bods_vehicles_bulk(_bods_cycle_counter)
+
                 for route in routes:
                     logger.info(f"\n[Fusion] === Route {route.route_name} ({route.direction}) ===")
 
                     # Step 1 — Fetch ALL buses for this route
-                    vehicles = fetch_all_buses_for_route(route)
+                    vehicles = fetch_all_buses_for_route(route, all_vehicles=all_vehicles)
                     
                     if not vehicles:
                         logger.warning(f"[Fusion] No live buses available for route {route.route_name}")
@@ -1287,18 +1357,19 @@ def fusion_engine():
                             "route_id": route.id,
                             "timestamp": datetime.now(),
                         }
-                        
-                        logger.info(f"\n[Fusion] -- Processing Bus {vehicle_id} --")
-                        logger.info(f"  Position: ({bus_lat:.5f}, {bus_lng:.5f})")
-                        logger.info(f"  Destination: {vehicle_data.get('destination')}")
-                        logger.info(f"  Operator: {operator}")
+
+                        tag = f"[Fusion:{route.route_name}:{route.direction[:3]}]"
+                        logger.info(f"\n{tag} -- Processing Bus {vehicle_id} --")
+                        logger.info(f"{tag}   Position: ({bus_lat:.5f}, {bus_lng:.5f})")
+                        logger.info(f"{tag}   Destination: {vehicle_data.get('destination')}")
+                        logger.info(f"{tag}   Operator: {operator}")
 
                         # Step 2 — Traffic from TomTom
                         traffic_delay = fetch_traffic_delay(bus_lat, bus_lng)
 
                         # Step 3 — Crowd from YOLO (ONLY at major stops)
                         is_near_major, nearest_stop_name, distance_to_stop = is_near_major_stop(
-                            bus_lat, bus_lng, route.direction
+                            bus_lat, bus_lng, route
                         )
                         
                         if is_near_major:
@@ -1337,14 +1408,23 @@ def fusion_engine():
 
                         # Step 6 — Calculate ETA with all factors
                         traffic_delay_seconds = traffic_delay or 0
-                        eta = predict_eta_xgboost(
-                            route=route,
-                            passenger_count=passenger_count,
-                            traffic_delay_seconds=traffic_delay_seconds,
-                            current_stop_seq=current_stop_seq,
-                            remaining_stops=remaining_stops,
-                            current_time=datetime.now(),
-                        )
+                        # XGBoost model is trained on Route 72 data only.
+                        # Gate it off for other routes until per-route models are available.
+                        if route.route_name == "72":
+                            eta = predict_eta_xgboost(
+                                route=route,
+                                passenger_count=passenger_count,
+                                traffic_delay_seconds=traffic_delay_seconds,
+                                current_stop_seq=current_stop_seq,
+                                remaining_stops=remaining_stops,
+                                current_time=datetime.now(),
+                            )
+                        else:
+                            logger.info(
+                                f"[XGBoost] Skipping model for route {route.route_name} "
+                                f"(no per-route model; using formula fallback)"
+                            )
+                            eta = None
 
                         if eta is None:
                             if travel_time_sec:
@@ -1387,7 +1467,7 @@ def fusion_engine():
                         db.session.commit()
 
                         delay_str = f"{delay_minutes:.0f}min late" if delay_minutes and delay_minutes > 0 else "on time"
-                        logger.info(f"[Fusion] Bus {vehicle_id}: ETA={eta}min | {delay_str}")
+                        logger.info(f"{tag} Bus {vehicle_id}: ETA={eta}min | {delay_str}")
                     logger.info(
                         f"[Fusion] Result: ETA={eta}min | Dist={distance_km:.2f}km | "
                         f"Crowd={passenger_count} | Traffic={traffic_delay:.0f}s | "
