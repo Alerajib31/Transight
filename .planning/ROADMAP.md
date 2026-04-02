@@ -26,7 +26,13 @@
   3. Running the GTFS loader with a route argument for A1 does not delete or alter Route 72 stop associations
   4. The BODS fetcher issues one bulk request per cycle (not one per route direction) and correctly fans out A1 and Route 72 vehicles in-process
   5. `is_near_major_stop()` returns meaningful results for A1 stop coordinates (not hardcoded Route 72 values)
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Bulk BODS fetch, operator allowlist cap removal, route-prefixed logs
+- [ ] 01-02-PLAN.md — GTFS agency_id filter + gtfs_loader scoped --route delete
+- [ ] 01-03-PLAN.md — is_near_major_stop() route-aware refactor + XGBoost gate for A1
+- [ ] 01-04-PLAN.md — A1 empirical discovery, route seeding, GTFS stop load, end-to-end validation
 
 ### Phase 2: Multi-Route Frontend
 **Goal**: A user can switch between Route 72 and A1, see live buses and stop-level arrival times on the map, and use the app comfortably on both mobile and desktop
@@ -47,7 +53,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend Foundation | 0/? | Not started | - |
+| 1. Backend Foundation | 0/4 | Not started | - |
 | 2. Multi-Route Frontend | 0/? | Not started | - |
 
 ---
@@ -75,3 +81,4 @@
 ---
 
 *Roadmap created: 2026-04-02*
+*Phase 1 planned: 2026-04-02 — 4 plans in 2 waves*
