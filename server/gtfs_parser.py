@@ -267,7 +267,8 @@ def build_trip_payload(trip, trip_stop_times, stop_lookup, service_date):
     }
 
 
-def get_trip_candidates(gtfs_data, route_name, direction, service_date, origin_name=None, destination_name=None):
+def get_trip_candidates(gtfs_data, route_name, direction, service_date,
+                        origin_name=None, destination_name=None, agency_id=None):
     """Return active trip candidates for a route/direction on a specific date."""
     direction_id = '0' if direction == 'outbound' else '1'
     stop_lookup = gtfs_data.get("stop_lookup", {})
@@ -276,6 +277,21 @@ def get_trip_candidates(gtfs_data, route_name, direction, service_date, origin_n
     matching_routes = list(gtfs_data.get("routes_by_short_name", {}).get(route_name, []))
     if not matching_routes:
         return []
+
+    if agency_id is not None:
+        before_count = len(matching_routes)
+        matching_routes = [r for r in matching_routes if r.get("agency_id") == agency_id]
+        logger.info(
+            f"[GTFS] agency_id filter '{agency_id}' for route '{route_name}': "
+            f"{before_count} -> {len(matching_routes)} matching routes"
+        )
+        if not matching_routes:
+            logger.warning(
+                f"[GTFS] No routes found for route_short_name='{route_name}' "
+                f"with agency_id='{agency_id}'. "
+                f"Check agency_id value against routes.txt in the GTFS zip."
+            )
+            return []
 
     route_ids = {route["route_id"] for route in matching_routes}
     candidate_trips = []
