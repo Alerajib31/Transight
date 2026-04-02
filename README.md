@@ -88,7 +88,15 @@ Open **http://localhost:3000** in your browser.
 .\start-dev.ps1
 ```
 
-That opens one PowerShell window for Flask and one for Vite.
+That opens one PowerShell window for Flask and one for Vite. If `.tools/node-v20.20.2-win-x64` exists, the frontend uses that local Node runtime automatically.
+
+### Windows Local Node Shell
+
+```powershell
+. .\use-local-node.ps1
+```
+
+That prepends the repo-local Node 20 runtime to your current PowerShell session so `npm run build` and `npm run dev` use the Vite-safe version.
 
 ---
 

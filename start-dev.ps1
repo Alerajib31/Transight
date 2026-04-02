@@ -10,6 +10,7 @@ if ($BackendOnly -and $FrontendOnly) {
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $projectRoot "server"
 $frontendDir = Join-Path $projectRoot "client"
+$localNodeDir = Join-Path $projectRoot ".tools\node-v20.20.2-win-x64"
 
 function Assert-CommandAvailable {
     param([string]$Name)
@@ -17,6 +18,15 @@ function Assert-CommandAvailable {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required command '$Name' is not available on PATH."
     }
+}
+
+function Get-FrontendCommand {
+    if (Test-Path (Join-Path $localNodeDir "npm.cmd")) {
+        return "& '$localNodeDir\\npm.cmd' run dev"
+    }
+
+    Assert-CommandAvailable -Name "npm"
+    return "npm run dev"
 }
 
 function Start-DevWindow {
@@ -31,7 +41,6 @@ function Start-DevWindow {
 }
 
 Assert-CommandAvailable -Name "py"
-Assert-CommandAvailable -Name "npm"
 
 if (-not $FrontendOnly) {
     Start-DevWindow -WorkingDirectory $backendDir -Command "py -3 app.py"
@@ -39,8 +48,13 @@ if (-not $FrontendOnly) {
 }
 
 if (-not $BackendOnly) {
-    Start-DevWindow -WorkingDirectory $frontendDir -Command "npm run dev"
+    $frontendCommand = Get-FrontendCommand
+    Start-DevWindow -WorkingDirectory $frontendDir -Command $frontendCommand
     Write-Host "Frontend window started in $frontendDir"
+}
+
+if (Test-Path $localNodeDir) {
+    Write-Host "Frontend will use local Node from $localNodeDir"
 }
 
 Write-Host "Open http://localhost:3000 after both services finish starting."
