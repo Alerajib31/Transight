@@ -1,8 +1,0 @@
-{
-  "disableLogging": false,
-  "disableSound": false,
-  "disableSessionStartHook": false,
-  "disablePreToolUseHook": false,
-  "disableStopHook": false,
-  "disableSubagentStopHook": false
-}
