@@ -28,6 +28,7 @@ from ultralytics import YOLO
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from env_utils import DEFAULT_DATABASE_URL, load_project_env_files
 from models import db, Route, BusLog
 from bods_parser import fetch_bods_vehicles
 from gtfs_parser import (
@@ -40,9 +41,11 @@ from gtfs_parser import (
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+load_project_env_files()
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:R%40jibale3138@localhost:5432/transight_db",
+    DEFAULT_DATABASE_URL,
 )
 BODS_API_KEY = os.getenv("BODS_API_KEY")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY")  # Traffic Flow API

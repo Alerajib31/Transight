@@ -4,38 +4,47 @@ Run: python setup_db.py
 """
 
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-DB_HOST = "localhost"
-DB_USER = "postgres"
-DB_PASS = "R@jibale3138"
-DB_NAME = "transight_db"
+from env_utils import get_database_admin_config, load_project_env_files
+
+load_project_env_files()
+DB_CONFIG = get_database_admin_config()
 
 def setup_database():
     try:
         # Connect to default postgres database
         conn = psycopg2.connect(
-            host=DB_HOST,
-            user=DB_USER,
-            password=DB_PASS,
+            host=DB_CONFIG["host"],
+            port=DB_CONFIG["port"],
+            user=DB_CONFIG["user"],
+            password=DB_CONFIG["password"],
             dbname="postgres"
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
         
         # Check if database exists
-        cursor.execute("SELECT 1 FROM pg_database WHERE datname=%s", (DB_NAME,))
+        cursor.execute("SELECT 1 FROM pg_database WHERE datname=%s", (DB_CONFIG["target_db_name"],))
         exists = cursor.fetchone()
         
         if not exists:
-            cursor.execute(f"CREATE DATABASE {DB_NAME}")
-            print(f"[OK] Database '{DB_NAME}' created successfully!")
+            cursor.execute(
+                sql.SQL("CREATE DATABASE {}").format(
+                    sql.Identifier(DB_CONFIG["target_db_name"])
+                )
+            )
+            print(f"[OK] Database '{DB_CONFIG['target_db_name']}' created successfully!")
         else:
-            print(f"[INFO] Database '{DB_NAME}' already exists.")
+            print(f"[INFO] Database '{DB_CONFIG['target_db_name']}' already exists.")
         
         cursor.close()
         conn.close()
-        print("[OK] Database setup complete.")
+        print(
+            "[OK] Database setup complete "
+            f"({DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['target_db_name']})."
+        )
         return True
         
     except Exception as e:

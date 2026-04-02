@@ -42,7 +42,7 @@ Transight2/
 
 ### 1. Environment
 
-Set the runtime variables in your shell before starting Flask. `app.py` reads environment variables directly and does not auto-load `.env`.
+The backend now auto-loads the project `.env` file from the repo root, so the checked-in local config works without manual exports.
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:R%40jibale3138@localhost:5432/transight_db"
@@ -53,14 +53,14 @@ $env:VIDEO_PATH="server/bus_queue.mp4"
 $env:FUSION_INTERVAL="10"
 ```
 
-If you prefer using `.env`, source those values into the shell first or copy them into your terminal session. The backend only sees variables exported into the process environment.
+Process environment variables still win if you want to override `.env` for a single session.
 
 ### 2. Database
 
 ```bash
 # Create the database if it does not already exist
 cd server
-python setup_db.py
+py -3 setup_db.py
 ```
 
 ### 3. Backend
@@ -68,8 +68,8 @@ python setup_db.py
 ```bash
 cd server
 pip install -r requirements.txt
-python seed.py          # Seeds 2 routes
-python app.py           # Starts Flask on :5000 + Fusion Engine
+py -3 seed.py          # Seeds 2 routes
+py -3 app.py           # Starts Flask on :5000 + Fusion Engine
 ```
 
 ### 4. Frontend
@@ -81,6 +81,14 @@ npm run dev             # Starts Vite on :3000
 ```
 
 Open **http://localhost:3000** in your browser.
+
+### Windows One-Command Start
+
+```powershell
+.\start-dev.ps1
+```
+
+That opens one PowerShell window for Flask and one for Vite.
 
 ---
 
@@ -110,8 +118,9 @@ Open **http://localhost:3000** in your browser.
 
 ## Notes
 
-- The backend does not auto-load `.env` in this repo. Export shell variables before running `python app.py`.
+- The backend and `setup_db.py` auto-load the repo-root `.env` file when present.
 - If the live API keys are missing, the app still starts and falls back to schedule-only behavior where possible.
+- On Windows in this repo, use `py -3` instead of `python` if `python` is not on `PATH`.
 
 ---
 
