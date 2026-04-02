@@ -11,7 +11,6 @@ client/.env
 client/.env.*
 !.env.example
 AGENTS.md
-!CLAUDE.md
 CLAUDE.md
 
 DATA_FLOW.md
@@ -36,6 +35,5 @@ docs/superpowers/specs/
 .trae
 .windsurf
 .vscode
-
 
 
