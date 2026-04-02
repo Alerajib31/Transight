@@ -49,7 +49,7 @@ $env:DATABASE_URL="postgresql://postgres:R%40jibale3138@localhost:5432/transight
 $env:BODS_API_KEY="your_bods_api_key_here"
 $env:TOMTOM_API_KEY="your_tomtom_traffic_key_here"
 $env:TOMTOM_ROUTING_KEY="your_tomtom_routing_key_here"
-$env:VIDEO_PATH="server/bus_queue.mp4"
+$env:VIDEO_PATH="bus_queue.mp4"
 $env:FUSION_INTERVAL="10"
 ```
 
@@ -100,7 +100,7 @@ That opens one PowerShell window for Flask and one for Vite.
 | `BODS_API_KEY`   | required for live GPS, optional for schedule-only fallback | Bus Open Data Service key  |
 | `TOMTOM_API_KEY` | required for live traffic, optional for schedule-only fallback | TomTom Traffic API key     |
 | `TOMTOM_ROUTING_KEY` | required for routing ETA estimates, optional for schedule-only fallback | TomTom Routing API key |
-| `VIDEO_PATH`     | `server/bus_queue.mp4`                               | Simulated camera feed      |
+| `VIDEO_PATH`     | `bus_queue.mp4`                                      | Simulated camera feed      |
 | `FUSION_INTERVAL`| `10`                                                 | Seconds between cycles     |
 
 ---
@@ -112,6 +112,7 @@ That opens one PowerShell window for Flask and one for Vite.
 | `/api/routes`          | GET    | All configured routes (for dropdown) |
 | `/api/routes/<route_id>/stops` | GET | Ordered stops for a route |
 | `/api/routes/<route_id>/predictions` | GET | Stop-by-stop timetable or live predictions |
+| `/api/routes/<route_id>/history` | GET | Recent `BusLog` samples for charts |
 | `/api/status/<route_id>` | GET  | Latest fused status for a route      |
 
 ---

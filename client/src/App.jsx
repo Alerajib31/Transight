@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import HistoricalTrends from "./HistoricalTrends.jsx";
 
 /* ── Fix Leaflet's default icon paths (Vite bundling workaround) ────── */
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -87,6 +88,7 @@ const stopIcon = new L.DivIcon({
 
 const API_BASE = "/api";
 const POLL_INTERVAL = 10_000; // 10 seconds
+const HISTORY_POLL_INTERVAL = 30_000;
 
 function getBusKey(bus, index = 0) {
   return `${bus.operator || "unknown"}:${bus.vehicle_id || `bus-${index}`}`;
@@ -154,6 +156,14 @@ export default function App() {
   });
   const [route, setRoute] = useState(null);
   const [stops, setStops] = useState([]);
+  const [routeHistory, setRouteHistory] = useState({
+    points: [],
+    stats: {},
+    sample_count: 0,
+    vehicle_id: null,
+    hours: 6,
+  });
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedBusKey, setSelectedBusKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -180,22 +190,15 @@ export default function App() {
         return r.json();
       })
       .then((data) => {
-        console.log("[DEBUG] Status API response:", data);
         let nextBuses = [];
-        // Handle new multi-bus format
         if (data.buses && Array.isArray(data.buses)) {
-          console.log("[DEBUG] Setting buses:", data.buses.length, data.buses);
           nextBuses = data.buses;
         } else {
-          console.log("[DEBUG] No buses array found, checking bus_available:", data.bus_available);
-          // If no buses array but bus_available is false
           if (data.bus_available === false) {
             nextBuses = [];
           } else if (data.status) {
-            // Old format - convert to new format
-            console.log("[DEBUG] Converting old format to new");
             nextBuses = [{
-              vehicle_id: 'unknown',
+              vehicle_id: "unknown",
               position: { lat: data.status.bus_lat, lng: data.status.bus_lng },
               eta: data.status.predicted_eta,
               passenger_count: data.status.passenger_count,
@@ -220,7 +223,6 @@ export default function App() {
         setError(null);
       })
       .catch((e) => {
-        console.error("[DEBUG] Error fetching status:", e);
         setBuses([]);
         setError(e.message);
       });
@@ -238,6 +240,50 @@ export default function App() {
         setStops([]);
       });
   }, [selectedRouteId]);
+
+  const fetchHistory = useCallback(() => {
+    if (!selectedRouteId) return;
+
+    const selected =
+      buses.find((bus, index) => getBusKey(bus, index) === selectedBusKey) ||
+      buses[0] ||
+      null;
+
+    const params = new URLSearchParams({
+      hours: "6",
+      limit: "36",
+    });
+
+    if (selected?.vehicle_id && selected.vehicle_id !== "unknown") {
+      params.set("vehicle_id", selected.vehicle_id);
+    }
+
+    setHistoryLoading(true);
+    fetch(`${API_BASE}/routes/${selectedRouteId}/history?${params.toString()}&_t=${Date.now()}`)
+      .then((r) => {
+        if (!r.ok) throw new Error("No historical data yet");
+        return r.json();
+      })
+      .then((data) => {
+        setRouteHistory({
+          points: data.points || [],
+          stats: data.stats || {},
+          sample_count: data.sample_count ?? 0,
+          vehicle_id: data.vehicle_id ?? null,
+          hours: data.hours ?? 6,
+        });
+      })
+      .catch(() => {
+        setRouteHistory({
+          points: [],
+          stats: {},
+          sample_count: 0,
+          vehicle_id: selected?.vehicle_id ?? null,
+          hours: 6,
+        });
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [selectedRouteId, buses, selectedBusKey]);
 
   const fetchPredictions = useCallback(() => {
     if (!selectedRouteId) return;
@@ -279,6 +325,15 @@ export default function App() {
     const id = setInterval(fetchPredictions, POLL_INTERVAL);
     return () => clearInterval(id);
   }, [fetchPredictions]);
+
+  useEffect(() => {
+    const initialLoad = setTimeout(fetchHistory, 0);
+    const id = setInterval(fetchHistory, HISTORY_POLL_INTERVAL);
+    return () => {
+      clearTimeout(initialLoad);
+      clearInterval(id);
+    };
+  }, [fetchHistory]);
 
 
   /* ── Derived values ────────────────────────────────────────────── */
@@ -340,6 +395,10 @@ export default function App() {
   
   // Map center - prioritize: bus > origin > default
   const mapCenter = activeBus?.position ? [activeBus.position.lat, activeBus.position.lng] : originPos ?? [51.4545, -2.5879];
+  const historyTitle = activeBus ? getBusLabel(activeBus, selectedBusIndex >= 0 ? selectedBusIndex : 0) : `${route?.route_name ?? "--"} ${route?.direction ?? ""}`.trim();
+  const historySubtitle = activeBus
+    ? `Last ${routeHistory.hours} hours of ETA, delay, passenger, and traffic samples for the selected live bus.`
+    : `Last ${routeHistory.hours} hours of route history. Live bus selection will focus the charts automatically.`;
 
   // ===================================================================
   // Render
@@ -390,7 +449,8 @@ export default function App() {
       </header>
 
       {/* ── Main Grid ─────────────────────────────────────────────── */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 lg:p-6">
+      <main className="flex-1 space-y-4 p-4 lg:p-6">
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* LEFT COLUMN: Info Cards */}
         <div className="flex flex-col gap-4 lg:col-span-1">
 
@@ -428,10 +488,19 @@ export default function App() {
             {buses.length > 0 ? (
               <div className="space-y-3">
                 {buses.map((bus, idx) => (
-                  <div key={getBusKey(bus, idx)} className="border-b border-border/50 pb-2 last:border-0">
+                  <button
+                    key={getBusKey(bus, idx)}
+                    type="button"
+                    onClick={() => setSelectedBusKey(getBusKey(bus, idx))}
+                    className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                      getBusKey(bus, idx) === selectedBusKey
+                        ? "border-accent bg-accent/10"
+                        : "border-border/60 bg-transparent hover:bg-bg-card-hover"
+                    }`}
+                  >
                     <p className="text-sm text-text-secondary">
                       {bus.operator && bus.operator !== "unknown" ? `${bus.operator} ` : ""}
-                      {bus.vehicle_id && bus.vehicle_id !== 'unknown' ? `(${bus.vehicle_id})` : `Bus #${idx + 1}`}
+                      {bus.vehicle_id && bus.vehicle_id !== "unknown" ? `(${bus.vehicle_id})` : `Bus #${idx + 1}`}
                     </p>
                     <p className="text-4xl font-black text-danger tabular-nums leading-none">
                       {typeof bus.eta === "number" ? bus.eta : "--"}
@@ -443,7 +512,7 @@ export default function App() {
                     {bus.delay_minutes > 0 && (
                       <p className="text-xs text-danger">{Math.round(bus.delay_minutes)} min late</p>
                     )}
-                  </div>
+                  </button>
                 ))}
               </div>
             ) : (
@@ -640,6 +709,15 @@ export default function App() {
             ))}
           </MapContainer>
         </div>
+        </section>
+
+        <HistoricalTrends
+          history={routeHistory}
+          theme={theme}
+          title={historyTitle}
+          subtitle={historySubtitle}
+          loading={historyLoading}
+        />
       </main>
 
       {/* ── Footer ────────────────────────────────────────────────── */}

@@ -25,10 +25,10 @@ import requests
 import cv2
 import joblib
 from ultralytics import YOLO
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from env_utils import DEFAULT_DATABASE_URL, load_project_env_files
+from env_utils import DEFAULT_DATABASE_URL, load_project_env_files, resolve_project_path
 from models import db, Route, BusLog
 from bods_parser import fetch_bods_vehicles
 from gtfs_parser import (
@@ -50,7 +50,7 @@ DATABASE_URL = os.getenv(
 BODS_API_KEY = os.getenv("BODS_API_KEY")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY")  # Traffic Flow API
 TOMTOM_ROUTING_KEY = os.getenv("TOMTOM_ROUTING_KEY")  # Routing API
-VIDEO_PATH = os.getenv("VIDEO_PATH", os.path.join(os.path.dirname(__file__), "..", "bus_queue.mp4"))
+VIDEO_PATH = resolve_project_path(os.getenv("VIDEO_PATH"), "bus_queue.mp4")
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
 ETA_MODEL_PATH = os.path.join(os.path.dirname(__file__), "xgboost_eta_model.joblib")
 GTFS_ZIP_PATH = os.path.join(os.path.dirname(__file__), "..", "itm_south_west_gtfs.zip")
@@ -1402,6 +1402,51 @@ def fusion_engine():
 
 
 # =========================================================================
+# History Helpers
+# =========================================================================
+def parse_bounded_int(value, default, min_value, max_value):
+    """Parse and clamp an integer query parameter."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+
+    return max(min_value, min(parsed, max_value))
+
+
+def build_history_point(log):
+    """Serialize a BusLog row for frontend charts."""
+    return {
+        "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+        "vehicle_id": log.vehicle_id,
+        "eta": log.predicted_eta,
+        "passenger_count": log.passenger_count,
+        "traffic_delay": log.traffic_delay,
+        "delay_minutes": log.delay_minutes,
+        "scheduled_service_time": log.scheduled_service_time,
+    }
+
+
+def summarize_history_metric(points, key):
+    """Return summary statistics for a numeric history series."""
+    values = [point[key] for point in points if isinstance(point.get(key), (int, float))]
+    if not values:
+        return {
+            "latest": None,
+            "min": None,
+            "max": None,
+            "average": None,
+        }
+
+    return {
+        "latest": values[-1],
+        "min": round(min(values), 1),
+        "max": round(max(values), 1),
+        "average": round(sum(values) / len(values), 1),
+    }
+
+
+# =========================================================================
 # API Endpoints
 # =========================================================================
 @app.route("/", methods=["GET"])
@@ -1415,6 +1460,7 @@ def root():
             "/api/routes",
             "/api/routes/<route_id>/stops",
             "/api/routes/<route_id>/predictions",
+            "/api/routes/<route_id>/history",
             "/api/status/<route_id>",
         ],
     })
@@ -1511,6 +1557,58 @@ def get_route_predictions(route_id):
             "last_updated": log.timestamp.isoformat() if log.timestamp else None
         },
         "stops": stop_predictions
+    })
+
+
+@app.route("/api/routes/<int:route_id>/history", methods=["GET"])
+def get_route_history(route_id):
+    """Return recent BusLog history for a route or a specific vehicle."""
+    route = db.session.get(Route, route_id)
+    if not route:
+        return jsonify({"error": "Route not found"}), 404
+
+    hours = parse_bounded_int(request.args.get("hours"), default=6, min_value=1, max_value=48)
+    limit = parse_bounded_int(request.args.get("limit"), default=36, min_value=6, max_value=240)
+    vehicle_id = (request.args.get("vehicle_id") or "").strip() or None
+    cutoff = datetime.now(UK_TZ) - timedelta(hours=hours)
+
+    history_query = (
+        BusLog.query
+        .filter_by(route_id=route_id)
+        .filter(BusLog.timestamp >= cutoff)
+        .filter(BusLog.predicted_eta.isnot(None))
+        .filter(BusLog.bus_lat.isnot(None))
+        .filter(BusLog.bus_lng.isnot(None))
+    )
+
+    if vehicle_id:
+        history_query = history_query.filter(BusLog.vehicle_id == vehicle_id)
+
+    logs = (
+        history_query
+        .order_by(BusLog.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    logs.reverse()
+
+    points = [build_history_point(log) for log in logs]
+    stats = {
+        "eta": summarize_history_metric(points, "eta"),
+        "delay_minutes": summarize_history_metric(points, "delay_minutes"),
+        "passenger_count": summarize_history_metric(points, "passenger_count"),
+        "traffic_delay": summarize_history_metric(points, "traffic_delay"),
+    }
+
+    return jsonify({
+        "route": route.to_dict(),
+        "vehicle_id": vehicle_id,
+        "hours": hours,
+        "limit": limit,
+        "sample_count": len(points),
+        "points": points,
+        "stats": stats,
+        "is_live": bool(points),
     })
 
 

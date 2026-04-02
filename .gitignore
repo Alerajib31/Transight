@@ -15,6 +15,7 @@ CLAUDE.md
 NEXT_STEPS.md
 DATA_FLOW.md
 INSTALL.md
+!INSTALL.md
 LICENSE
 SYSTEM_OVERVIEW.md
 .claude/
@@ -35,4 +36,3 @@ docs/superpowers/specs/
 .trae
 .windsurf
 .vscode
-

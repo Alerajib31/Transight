@@ -54,6 +54,23 @@ def get_database_url() -> str:
     return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
+def resolve_project_path(path_value: str | None, default_relative_path: str) -> str:
+    """Resolve a file path relative to the project root when needed."""
+    raw_value = path_value or default_relative_path
+    if os.path.isabs(raw_value):
+        return raw_value
+
+    project_relative = os.path.abspath(os.path.join(PROJECT_ROOT, raw_value))
+    if os.path.exists(project_relative):
+        return project_relative
+
+    project_basename = os.path.abspath(os.path.join(PROJECT_ROOT, os.path.basename(raw_value)))
+    if os.path.exists(project_basename):
+        return project_basename
+
+    return project_relative
+
+
 def get_database_admin_config() -> dict[str, object]:
     """Build psycopg2 connection settings from DATABASE_URL."""
     parsed = urlparse(get_database_url())
