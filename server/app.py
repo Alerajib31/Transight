@@ -92,6 +92,16 @@ _crowd_history = {}
 MAX_CROWD_HISTORY = 3  # Average last 3 readings
 _latest_bus_metadata = {}
 _eta_model = None
+_tomtom_service_state = {
+    "traffic": {
+        "disabled": False,
+        "auth_logged": False,
+    },
+    "routing": {
+        "disabled": False,
+        "auth_logged": False,
+    },
+}
 
 
 def parse_gtfs_time(value):
@@ -605,6 +615,11 @@ def get_route_distance_tomtom(origin_lat, origin_lng, dest_lat, dest_lng):
 
     Returns: (distance_km, travel_time_seconds, route_summary)
     """
+    routing_state = _tomtom_service_state["routing"]
+
+    if routing_state["disabled"]:
+        return get_route_distance_osrm(origin_lat, origin_lng, dest_lat, dest_lng)
+
     if not TOMTOM_ROUTING_KEY:
         logger.warning("[TomTom Routing] No routing API key - falling back to OSRM")
         return get_route_distance_osrm(origin_lat, origin_lng, dest_lat, dest_lng)
@@ -642,12 +657,25 @@ def get_route_distance_tomtom(origin_lat, origin_lng, dest_lat, dest_lng):
                 'route_points': route.get('legs', [{}])[0].get('points', [])
             }
         else:
-            logger.warning("[TomTom Routing] No routes found - falling back to haversine")
-            return haversine(origin_lat, origin_lng, dest_lat, dest_lng), None, None
+            logger.warning("[TomTom Routing] No routes found - falling back to OSRM")
+            return get_route_distance_osrm(origin_lat, origin_lng, dest_lat, dest_lng)
 
+    except requests.exceptions.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code in (401, 403):
+            routing_state["disabled"] = True
+            if not routing_state["auth_logged"]:
+                logger.warning(
+                    f"[TomTom Routing] HTTP {status_code} from TomTom. "
+                    "Disabling TomTom routing for this process and falling back to OSRM."
+                )
+                routing_state["auth_logged"] = True
+        else:
+            logger.error(f"[TomTom Routing] Error: {exc}")
+        return get_route_distance_osrm(origin_lat, origin_lng, dest_lat, dest_lng)
     except Exception as exc:
         logger.error(f"[TomTom Routing] Error: {exc}")
-        return haversine(origin_lat, origin_lng, dest_lat, dest_lng), None, None
+        return get_route_distance_osrm(origin_lat, origin_lng, dest_lat, dest_lng)
 
 
 # =========================================================================
@@ -737,7 +765,9 @@ def fetch_traffic_delay(lat: float, lng: float):
     Query TomTom Traffic Flow API for current delay at a point.
     Returns delay in seconds, or 0.0 on failure.
     """
-    if not TOMTOM_API_KEY:
+    traffic_state = _tomtom_service_state["traffic"]
+
+    if not TOMTOM_API_KEY or traffic_state["disabled"]:
         return 0.0
 
     try:
@@ -773,6 +803,19 @@ def fetch_traffic_delay(lat: float, lng: float):
         
         return 0.0
         
+    except requests.exceptions.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code in (401, 403):
+            traffic_state["disabled"] = True
+            if not traffic_state["auth_logged"]:
+                logger.warning(
+                    f"[TomTom] HTTP {status_code} from TomTom traffic API. "
+                    "Disabling traffic lookups for this process and using zero-delay fallback."
+                )
+                traffic_state["auth_logged"] = True
+            return 0.0
+        logger.error(f"[TomTom] Error: {exc}")
+        return 0.0
     except Exception as exc:
         logger.error(f"[TomTom] Error: {exc}")
         return 0.0
@@ -1005,7 +1048,7 @@ def get_current_service_time(route_id, current_lat, current_lng, current_time=No
         current_time = datetime.now(UK_TZ)
 
     local_time = to_uk_datetime(current_time)
-    route = Route.query.get(route_id)
+    route = db.session.get(Route, route_id)
     
     # Get all stops for this route
     route_stops = (RouteStop.query
@@ -1092,7 +1135,7 @@ def calculate_stop_predictions(route_id, current_lat, current_lng, current_eta_m
         return []
 
     current_stop_seq, current_stop, _ = get_current_stop_context(route_stops, current_lat, current_lng)
-    route = Route.query.get(route_id)
+    route = db.session.get(Route, route_id)
     route_delay_min = calculate_route_delay(route, current_stop_seq, current_eta_min)
     selected_trip = None
     schedule_by_sequence = {}
@@ -1386,7 +1429,7 @@ def get_route_stops(route_id):
     """Return all stops for a specific route in order."""
     from models import RouteStop
     
-    route = Route.query.get(route_id)
+    route = db.session.get(Route, route_id)
     if not route:
         return jsonify({"error": "Route not found"}), 404
     
@@ -1407,7 +1450,7 @@ def get_route_predictions(route_id):
     Return stop-by-stop predictions with scheduled times and delays.
     Similar to the transit app showing 'Delayed X min' at each stop.
     """
-    route = Route.query.get(route_id)
+    route = db.session.get(Route, route_id)
     if not route:
         return jsonify({"error": "Route not found"}), 404
     
@@ -1471,7 +1514,7 @@ def get_route_predictions(route_id):
 @app.route("/api/status/<int:route_id>", methods=["GET"])
 def get_status(route_id):
     """Return ALL buses for the route with their positions and ETAs."""
-    route = Route.query.get(route_id)
+    route = db.session.get(Route, route_id)
     if not route:
         return jsonify({"error": "Route not found"}), 404
     

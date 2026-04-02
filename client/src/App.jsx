@@ -98,27 +98,43 @@ function getBusLabel(bus, index = 0) {
   return `${operator} • ${vehicle}`;
 }
 
+function getStoredTheme() {
+  try {
+    const saved = localStorage.getItem("transight-theme");
+    return saved === "light" || saved === "dark" ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTheme(theme) {
+  try {
+    localStorage.setItem("transight-theme", theme);
+  } catch {
+    // Ignore storage failures and keep the in-memory theme state.
+    return;
+  }
+}
+
 // =====================================================================
 // Component: App
 // =====================================================================
 export default function App() {
   const [theme, setTheme] = useState(() => {
-    try {
-      const saved = localStorage.getItem("transight-theme");
-      if (saved === "light" || saved === "dark") return saved;
-    } catch {}
+    const saved = getStoredTheme();
+    if (saved) return saved;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem("transight-theme", theme); } catch {}
+    saveTheme(theme);
   }, [theme]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e) => {
-      try { if (localStorage.getItem("transight-theme")) return; } catch {}
+      if (getStoredTheme()) return;
       setTheme(e.matches ? "dark" : "light");
     };
     mq.addEventListener("change", handler);
