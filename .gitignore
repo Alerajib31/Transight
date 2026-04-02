@@ -12,6 +12,8 @@ client/.env.*
 !.env.example
 AGENTS.md
 !CLAUDE.md
+CLAUDE.md
+
 DATA_FLOW.md
 INSTALL.md
 LICENSE
