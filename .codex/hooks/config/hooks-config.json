@@ -1,0 +1,7 @@
+{
+  "disableLogging": false,
+  "disableSound": false,
+  "disableAgentTurnCompleteHook": false,
+  "disableSessionStartHook": false,
+  "disableStopHook": false
+}

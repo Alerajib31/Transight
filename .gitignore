@@ -11,18 +11,50 @@ client/.env
 client/.env.*
 !.env.example
 AGENTS.md
-CLAUDE.md
+!CLAUDE.md
 DATA_FLOW.md
 INSTALL.md
 LICENSE
 SYSTEM_OVERVIEW.md
-.claude
 .claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/commands/**
+!.claude/agents/
+!.claude/agents/**
+!.claude/rules/
+!.claude/rules/**
+!.claude/hooks/
+!.claude/hooks/HOOKS-README.md
+!.claude/hooks/config/
+!.claude/hooks/config/hooks-config.json
+!.claude/hooks/scripts/
+!.claude/hooks/scripts/**
+!.claude/skills/
+!.claude/skills/transight-backend/
+!.claude/skills/transight-backend/**
+!.claude/skills/transight-frontend/
+!.claude/skills/transight-frontend/**
+!.claude/skills/transight-verification/
+!.claude/skills/transight-verification/**
+.claude/settings.local.json
+.claude/hooks/config/hooks-config.local.json
+.claude/hooks/logs/
 
 docs\superpowers\specs\2026-04-01-first-bus-style-retheme-design.md
 .agent
 .codebuddy
-.codex
+.codex/*
+!.codex/config.toml
+!.codex/hooks.json
+!.codex/hooks/
+!.codex/hooks/HOOKS-README.md
+!.codex/hooks/config/
+!.codex/hooks/config/hooks-config.json
+!.codex/hooks/scripts/
+!.codex/hooks/scripts/**
+.codex/hooks/config/hooks-config.local.json
+.codex/hooks/logs/
 .continue
 .cursor
 .gemini
@@ -34,7 +66,6 @@ docs\superpowers\specs\2026-04-01-first-bus-style-retheme-design.md
 .trae
 .windsurf
 .vscode
-
 
 
 

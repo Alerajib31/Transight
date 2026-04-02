@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^startup$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 .codex/hooks/scripts/hooks.py --hook SessionStart",
+            "timeout": 10,
+            "statusMessage": "Loading Transight Codex context"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 .codex/hooks/scripts/hooks.py --hook Stop",
+            "timeout": 10,
+            "statusMessage": "Running Transight stop hook"
+          }
+        ]
+      }
+    ]
+  }
+}

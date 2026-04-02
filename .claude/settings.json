@@ -1,0 +1,80 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(py *)",
+      "Bash(npm run *)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)"
+    ],
+    "ask": [
+      "Bash(python seed.py)",
+      "Bash(py seed.py)",
+      "Bash(python server/seed.py)",
+      "Bash(py server/seed.py)"
+    ]
+  },
+  "respectGitignore": true,
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "80",
+    "FUSION_INTERVAL": "10",
+    "VIDEO_PATH": "server/bus_queue.mp4"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/hooks.py",
+            "timeout": 5000,
+            "statusMessage": "Loading Transight context",
+            "once": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/hooks.py",
+            "timeout": 5000,
+            "statusMessage": "Checking Transight safety guards"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/hooks.py",
+            "timeout": 5000,
+            "async": true,
+            "statusMessage": "Running stop hook"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 ${CLAUDE_PROJECT_DIR}/.claude/hooks/scripts/hooks.py",
+            "timeout": 5000,
+            "async": true,
+            "statusMessage": "Finishing subagent hook"
+          }
+        ]
+      }
+    ]
+  }
+}
