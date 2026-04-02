@@ -30,7 +30,7 @@
 
 Plans:
 - [ ] 01-01-PLAN.md — Bulk BODS fetch, operator allowlist cap removal, route-prefixed logs
-- [ ] 01-02-PLAN.md — GTFS agency_id filter + gtfs_loader scoped --route delete
+- [x] 01-02-PLAN.md — GTFS agency_id filter + gtfs_loader scoped --route delete
 - [ ] 01-03-PLAN.md — is_near_major_stop() route-aware refactor + XGBoost gate for A1
 - [ ] 01-04-PLAN.md — A1 empirical discovery, route seeding, GTFS stop load, end-to-end validation
 
@@ -53,7 +53,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend Foundation | 0/4 | Not started | - |
+| 1. Backend Foundation | 1/4 | In Progress|  |
 | 2. Multi-Route Frontend | 0/? | Not started | - |
 
 ---

@@ -9,9 +9,9 @@ Requirements for the A1 Airport Flyer multi-route update. Each maps to roadmap p
 
 ### Data Pipeline
 
-- [ ] **DATA-01**: A1 Airport Flyer route extracted from GTFS with agency filtering to avoid operator collisions
+- [x] **DATA-01**: A1 Airport Flyer route extracted from GTFS with agency filtering to avoid operator collisions
 - [ ] **DATA-02**: A1 route and stops seeded in database for both directions (Bristol → Airport, Airport → Bristol)
-- [ ] **DATA-03**: GTFS loader safely adds new routes without wiping existing Route 72 data
+- [x] **DATA-03**: GTFS loader safely adds new routes without wiping existing Route 72 data
 - [ ] **DATA-04**: BODS fetch refactored for multi-route efficiency (bulk or batched requests)
 
 ### Live Tracking
@@ -66,9 +66,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
+| DATA-03 | Phase 1 | Complete |
 | DATA-04 | Phase 1 | Pending |
 | LIVE-01 | Phase 1 | Pending |
 | LIVE-02 | Phase 1 | Pending |
