@@ -151,10 +151,11 @@ if __name__ == "__main__":
     if not BODS_API_KEY:
         raise SystemExit("Set BODS_API_KEY in your environment before testing bods_parser.py")
     
-    # Test with route 72
-    vehicles = fetch_bods_vehicles(BODS_API_KEY, line_ref='72')
-    
-    print(f"\nFound {len(vehicles)} vehicles for route 72:")
+    test_line_ref = os.getenv("TEST_LINE_REF", "72")
+    print(f"Testing BODS fetch for line_ref={test_line_ref!r} ...")
+    vehicles = fetch_bods_vehicles(BODS_API_KEY, line_ref=test_line_ref)
+
+    print(f"\nFound {len(vehicles)} vehicles for route {test_line_ref}:")
     for v in vehicles[:5]:
         print(f"  - Line {v.get('line')} ({v.get('direction')}): {v.get('lat'):.4f}, {v.get('lng'):.4f}")
         print(f"    To: {v.get('destination')}, Speed: {v.get('speed')} km/h, Bearing: {v.get('bearing')}°")
