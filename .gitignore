@@ -12,7 +12,7 @@ client/.env.*
 !.env.example
 AGENTS.md
 CLAUDE.md
-
+NEXT_STEPS.md
 DATA_FLOW.md
 INSTALL.md
 LICENSE
