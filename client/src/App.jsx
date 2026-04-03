@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import HistoricalTrends from "./HistoricalTrends.jsx";
@@ -109,6 +109,87 @@ function getDisplayTerminalName(routeName, terminalName) {
     return "Bristol";
   }
   return terminalName;
+}
+
+function buildBoundsPoints(routePath, originPos, destPos) {
+  const points = [];
+
+  for (const point of routePath || []) {
+    if (
+      Array.isArray(point)
+      && point.length === 2
+      && Number.isFinite(point[0])
+      && Number.isFinite(point[1])
+    ) {
+      points.push(point);
+    }
+  }
+
+  for (const point of [originPos, destPos]) {
+    if (
+      Array.isArray(point)
+      && point.length === 2
+      && Number.isFinite(point[0])
+      && Number.isFinite(point[1])
+    ) {
+      points.push(point);
+    }
+  }
+
+  return points;
+}
+
+function MapViewportController({ fitKey, fitPoints, resizeKey }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    if (!container || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize({ pan: false });
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [map]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      map.invalidateSize({ pan: false });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [map, resizeKey]);
+
+  useEffect(() => {
+    if (!fitPoints.length) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      const bounds = L.latLngBounds(fitPoints);
+      if (!bounds.isValid()) {
+        return;
+      }
+
+      map.invalidateSize({ pan: false });
+      if (fitPoints.length === 1) {
+        map.setView(fitPoints[0], 14, { animate: false });
+        return;
+      }
+
+      map.fitBounds(bounds, {
+        padding: [36, 36],
+        maxZoom: 13,
+        animate: false,
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [map, fitKey, fitPoints]);
+
+  return null;
 }
 
 function getStoredTheme() {
@@ -403,6 +484,9 @@ export default function App() {
   
   // Route path for polyline
   const routePath = route?.route_path || [];
+  const routeBoundsPoints = buildBoundsPoints(routePath, originPos, destPos);
+  const mapFitKey = `${selectedRouteId ?? "none"}:${routeBoundsPoints.length}`;
+  const mapResizeKey = `${theme}:${selectedRouteId ?? "none"}:${buses.length}:${stops.length}:${routePath.length}`;
   
   // Map center - prioritize: bus > origin > default
   const mapCenter = activeBus?.position ? [activeBus.position.lat, activeBus.position.lng] : originPos ?? [51.4545, -2.5879];
@@ -609,6 +693,11 @@ export default function App() {
             className="w-full h-full min-h-[500px] lg:min-h-0"
             style={{ height: "100%" }}
           >
+            <MapViewportController
+              fitKey={mapFitKey}
+              fitPoints={routeBoundsPoints}
+              resizeKey={mapResizeKey}
+            />
             {/* Themed map tiles */}
             <TileLayer
               key={theme}

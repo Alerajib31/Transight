@@ -1333,6 +1333,23 @@ def fetch_traffic_delay(lat: float, lng: float):
         return 0.0
 
 
+def resolve_traffic_delay_seconds(point_delay_seconds, route_summary=None):
+    """Resolve the traffic delay to persist without discarding non-zero flow data."""
+    point_delay = max(0.0, float(point_delay_seconds or 0.0))
+    route_delay = 0.0
+    if route_summary:
+        route_delay = max(0.0, float(route_summary.get("traffic_delay_sec") or 0.0))
+
+    if point_delay > route_delay:
+        logger.info(
+            "[TomTom] Using point-flow traffic delay %.1fs over route delay %.1fs",
+            point_delay,
+            route_delay,
+        )
+
+    return round(max(point_delay, route_delay), 1)
+
+
 # =========================================================================
 # YOLOv8 Passenger Counter
 # =========================================================================
@@ -1812,7 +1829,7 @@ def fusion_engine():
                         logger.info(f"{tag}   Operator: {operator}")
 
                         # Step 2 — Traffic from TomTom
-                        traffic_delay = fetch_traffic_delay(bus_lat, bus_lng)
+                        point_traffic_delay = fetch_traffic_delay(bus_lat, bus_lng)
 
                         # Step 3 — Crowd from YOLO (ONLY at major stops)
                         is_near_major, nearest_stop_name, distance_to_stop = is_near_major_stop(
@@ -1841,7 +1858,10 @@ def fusion_engine():
                             route.dest_lat, route.dest_lng
                         )
 
-                        traffic_delay = route_summary.get('traffic_delay_sec', 0) if route_summary else 0
+                        traffic_delay = resolve_traffic_delay_seconds(
+                            point_traffic_delay,
+                            route_summary,
+                        )
 
                         # Step 5 — Count remaining bus stops
                         remaining_stops, stop_delay_min, current_stop_seq = count_remaining_stops(

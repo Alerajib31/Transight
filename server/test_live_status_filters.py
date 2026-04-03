@@ -284,6 +284,22 @@ class LiveStatusFilterTests(unittest.TestCase):
 
         self.assertFalse(eligible)
 
+    def test_resolve_traffic_delay_keeps_non_zero_point_flow_value(self):
+        traffic_delay = app_module.resolve_traffic_delay_seconds(
+            136.4,
+            {"traffic_delay_sec": 0},
+        )
+
+        self.assertEqual(traffic_delay, 136.4)
+
+    def test_resolve_traffic_delay_prefers_larger_route_delay_when_present(self):
+        traffic_delay = app_module.resolve_traffic_delay_seconds(
+            15.0,
+            {"traffic_delay_sec": 42.0},
+        )
+
+        self.assertEqual(traffic_delay, 42.0)
+
 
 if __name__ == "__main__":
     unittest.main()
