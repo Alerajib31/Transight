@@ -9,7 +9,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Backend Foundation** - Close all silent-failure pitfalls, load A1 data, and make the Fusion Engine route-aware before any A1 rows enter the system
+- [x] **Phase 1: Backend Foundation** - Close all silent-failure pitfalls, load A1 data, and make the Fusion Engine route-aware before any A1 rows enter the system
 - [ ] **Phase 2: Multi-Route Frontend** - Deliver the visible multi-route experience: route selector, stop popups, responsive layouts, delay indicators, and per-route ETA quality
 
 ---
@@ -32,7 +32,7 @@ Plans:
 - [x] 01-01-PLAN.md — Bulk BODS fetch, operator allowlist cap removal, route-prefixed logs
 - [x] 01-02-PLAN.md — GTFS agency_id filter + gtfs_loader scoped --route delete
 - [x] 01-03-PLAN.md — is_near_major_stop() route-aware refactor + XGBoost gate for A1
-- [ ] 01-04-PLAN.md — A1 empirical discovery, route seeding, GTFS stop load, end-to-end validation
+- [x] 01-04-PLAN.md — A1 empirical discovery, route seeding, GTFS stop load, end-to-end validation
 
 ### Phase 2: Multi-Route Frontend
 **Goal**: A user can switch between Route 72 and A1, see live buses and stop-level arrival times on the map, and use the app comfortably on both mobile and desktop
@@ -53,7 +53,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend Foundation | 3/4 | In Progress|  |
+| 1. Backend Foundation | 4/4 | Complete |  |
 | 2. Multi-Route Frontend | 0/? | Not started | - |
 
 ---

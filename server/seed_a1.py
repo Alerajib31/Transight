@@ -31,7 +31,7 @@ A1_OPERATOR_CODE = "FBRI"
 
 # GTFS agency_id for First Bristol in the South West GTFS feed (verify first)
 # Set to None if only one agency uses "A1" route_short_name (collision-free)
-A1_GTFS_AGENCY_ID = None  # e.g. "276" — set after running discover_a1.py --gtfs
+A1_GTFS_AGENCY_ID = "OP736"  # Confirmed via discover_a1.py --gtfs-only
 
 # A1 route geometry (Bristol City Centre -> Bristol Airport)
 # Source: known coordinates; verify against map after seeding
