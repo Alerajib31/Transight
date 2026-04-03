@@ -187,7 +187,7 @@ function MapViewportController({ fitKey, fitPoints, resizeKey }) {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [map, fitKey, fitPoints]);
+  }, [map, fitKey]);
 
   return null;
 }
@@ -486,7 +486,7 @@ export default function App() {
   const routePath = route?.route_path || [];
   const routeBoundsPoints = buildBoundsPoints(routePath, originPos, destPos);
   const mapFitKey = `${selectedRouteId ?? "none"}:${routeBoundsPoints.length}`;
-  const mapResizeKey = `${theme}:${selectedRouteId ?? "none"}:${buses.length}:${stops.length}:${routePath.length}`;
+  const mapResizeKey = `${theme}:${selectedRouteId ?? "none"}`;
   
   // Map center - prioritize: bus > origin > default
   const mapCenter = activeBus?.position ? [activeBus.position.lat, activeBus.position.lng] : originPos ?? [51.4545, -2.5879];
