@@ -61,6 +61,25 @@ class LiveStatusFilterTests(unittest.TestCase):
     def setUp(self):
         self.route = make_route()
 
+    def test_format_gtfs_time_normalizes_rollover_hours_for_ui(self):
+        self.assertEqual(app_module.format_gtfs_time("24:41:00"), "00:41")
+        self.assertEqual(app_module.format_gtfs_time("25:06:00"), "01:06")
+
+    def test_route_stop_schedule_prefers_stop_id_over_sequence(self):
+        route_stop = SimpleNamespace(
+            sequence=3,
+            scheduled_arrival="24:41:00",
+            stop=SimpleNamespace(stop_id="war-memorial"),
+        )
+
+        scheduled = app_module.resolve_route_stop_schedule(
+            route_stop,
+            schedule_by_stop_id={"war-memorial": "06:11:00"},
+            schedule_by_sequence={3: "23:26:00"},
+        )
+
+        self.assertEqual(scheduled, "06:11:00")
+
     def test_origin_staging_bus_is_hidden_before_four_minute_window(self):
         trip = {
             "service_date": date(2026, 4, 3),

@@ -167,6 +167,7 @@ def format_gtfs_time(value):
         return None
 
     hour, minute, _ = parsed
+    hour %= 24
     return f"{hour:02d}:{minute:02d}"
 
 
@@ -809,6 +810,19 @@ def build_schedule_only_response(route_id, route, current_time=None):
         "is_live": False,
         "stops": stops_data,
     }
+
+
+def resolve_route_stop_schedule(route_stop, schedule_by_stop_id=None, schedule_by_sequence=None):
+    """Resolve the best scheduled time for a route stop from the matched trip first."""
+    schedule_by_stop_id = schedule_by_stop_id or {}
+    schedule_by_sequence = schedule_by_sequence or {}
+
+    stop = getattr(route_stop, "stop", None)
+    stop_id = getattr(stop, "stop_id", None)
+    if stop_id and stop_id in schedule_by_stop_id:
+        return schedule_by_stop_id[stop_id]
+
+    return schedule_by_sequence.get(route_stop.sequence, route_stop.scheduled_arrival)
 
 
 def get_smoothed_crowd_count(vehicle_id, current_count):
@@ -1671,6 +1685,7 @@ def calculate_stop_predictions(route_id, current_lat, current_lng, current_eta_m
     route_delay_min = calculate_route_delay(route, current_stop_seq, current_eta_min)
     selected_trip = None
     schedule_by_sequence = {}
+    schedule_by_stop_id = {}
     if route:
         selected_trip = get_gtfs_schedule_trip(
             route,
@@ -1683,6 +1698,11 @@ def calculate_stop_predictions(route_id, current_lat, current_lng, current_eta_m
                 stop["sequence"]: stop["arrival_time"]
                 for stop in selected_trip["stops"]
             }
+            schedule_by_stop_id = {
+                stop["stop_id"]: stop["arrival_time"]
+                for stop in selected_trip["stops"]
+                if stop.get("stop_id")
+            }
 
     # Use the matched GTFS trip as the delay baseline when available.
     _, current_delay_min, _ = get_current_service_time(
@@ -1692,14 +1712,12 @@ def calculate_stop_predictions(route_id, current_lat, current_lng, current_eta_m
     
     predictions = []
     
-    # Calculate remaining stops
-    remaining_stops = [rs for rs in route_stops if rs.sequence >= current_stop_seq]
-
-    if not remaining_stops:
-        return predictions
-
-    for rs in remaining_stops:
-        scheduled = schedule_by_sequence.get(rs.sequence, rs.scheduled_arrival)
+    for rs in route_stops:
+        scheduled = resolve_route_stop_schedule(
+            rs,
+            schedule_by_stop_id=schedule_by_stop_id,
+            schedule_by_sequence=schedule_by_sequence,
+        )
         predicted_time = local_time + timedelta(minutes=current_eta_min)
         predicted_time_str = predicted_time.strftime("%H:%M")
 
@@ -2045,7 +2063,13 @@ def get_route_stops(route_id):
     
     return jsonify({
         "route": route.to_dict(),
-        "stops": [rs.to_dict() for rs in route_stops]
+        "stops": [
+            {
+                **rs.to_dict(),
+                "scheduled_arrival": format_gtfs_time(rs.scheduled_arrival),
+            }
+            for rs in route_stops
+        ]
     })
 
 

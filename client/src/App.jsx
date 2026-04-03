@@ -111,6 +111,26 @@ function getDisplayTerminalName(routeName, terminalName) {
   return terminalName;
 }
 
+function formatScheduleTime(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parts = String(value).split(":");
+  if (parts.length < 2) {
+    return value;
+  }
+
+  const hour = Number.parseInt(parts[0], 10);
+  const minute = Number.parseInt(parts[1], 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return value;
+  }
+
+  const normalizedHour = ((hour % 24) + 24) % 24;
+  return `${String(normalizedHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 function buildBoundsPoints(routePath, originPos, destPos) {
   const points = [];
 
@@ -769,11 +789,11 @@ export default function App() {
                 const arrivalTime =
                   stopPrediction?.predicted_arrival ||
                   stopPrediction?.scheduled_arrival ||
-                  stop.scheduled_arrival ||
+                  formatScheduleTime(stop.scheduled_arrival) ||
                   "--";
                 const delayText =
                   stopPrediction?.delay_text ||
-                  (!showingLivePredictions && stop.scheduled_arrival ? "Scheduled service" : "No live prediction yet");
+                  (formatScheduleTime(stop.scheduled_arrival) ? "Static schedule reference" : "No live prediction yet");
 
                 return (
                   <Marker
