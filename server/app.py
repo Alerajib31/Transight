@@ -513,23 +513,50 @@ def get_smoothed_crowd_count(vehicle_id, current_count):
     return round(avg_count)
 
 
-def is_near_major_stop(bus_lat, bus_lng, direction):
+def is_near_major_stop(bus_lat: float, bus_lng: float, route) -> tuple:
     """
     Check if bus is near a major stop where crowd detection should be applied.
-    
-    Returns: (is_near_major_stop, nearest_stop_name)
+    Uses the route's actual stops from the database. Falls back to hardcoded
+    Route 72 constants if the route has no database stops loaded yet.
+
+    Args:
+        bus_lat: Current bus latitude.
+        bus_lng: Current bus longitude.
+        route:   SQLAlchemy Route object (has .route_name, .direction, .route_stops).
+
+    Returns:
+        Tuple of (is_near: bool, nearest_stop_name: str, distance_km: float)
     """
-    major_stops = MAJOR_STOPS_OUTBOUND if direction == 'outbound' else MAJOR_STOPS_INBOUND
-    
+    # Build candidate major stop list from database RouteStop records for this route.
+    # Use all stops in the route as candidates (crowd detection checks proximity anyway).
+    candidate_stops = []
+    try:
+        for rs in route.route_stops:
+            if rs.stop and rs.stop.lat is not None and rs.stop.lng is not None:
+                candidate_stops.append((rs.stop.stop_name, rs.stop.lat, rs.stop.lng))
+    except Exception:
+        candidate_stops = []
+
+    # Fall back to hardcoded Route 72 constants when DB stops unavailable
+    if not candidate_stops:
+        direction = getattr(route, 'direction', 'outbound')
+        candidate_stops = (
+            MAJOR_STOPS_OUTBOUND if direction == 'outbound' else MAJOR_STOPS_INBOUND
+        )
+        logger.debug(
+            f"[Crowd] is_near_major_stop: no DB stops for {route.route_name} "
+            f"({route.direction}); using hardcoded fallback"
+        )
+
     min_dist = float('inf')
     nearest_stop = None
-    
-    for stop_name, stop_lat, stop_lng in major_stops:
+
+    for stop_name, stop_lat, stop_lng in candidate_stops:
         dist = haversine(bus_lat, bus_lng, stop_lat, stop_lng)
         if dist < min_dist:
             min_dist = dist
             nearest_stop = stop_name
-    
+
     is_near = min_dist <= CROWD_DETECTION_RADIUS_KM
     return is_near, nearest_stop, min_dist
 
@@ -1298,7 +1325,7 @@ def fusion_engine():
 
                         # Step 3 — Crowd from YOLO (ONLY at major stops)
                         is_near_major, nearest_stop_name, distance_to_stop = is_near_major_stop(
-                            bus_lat, bus_lng, route.direction
+                            bus_lat, bus_lng, route
                         )
                         
                         if is_near_major:
@@ -1337,14 +1364,23 @@ def fusion_engine():
 
                         # Step 6 — Calculate ETA with all factors
                         traffic_delay_seconds = traffic_delay or 0
-                        eta = predict_eta_xgboost(
-                            route=route,
-                            passenger_count=passenger_count,
-                            traffic_delay_seconds=traffic_delay_seconds,
-                            current_stop_seq=current_stop_seq,
-                            remaining_stops=remaining_stops,
-                            current_time=datetime.now(),
-                        )
+                        # XGBoost model is trained on Route 72 data only.
+                        # Gate it off for other routes until per-route models are available.
+                        if route.route_name == "72":
+                            eta = predict_eta_xgboost(
+                                route=route,
+                                passenger_count=passenger_count,
+                                traffic_delay_seconds=traffic_delay_seconds,
+                                current_stop_seq=current_stop_seq,
+                                remaining_stops=remaining_stops,
+                                current_time=datetime.now(),
+                            )
+                        else:
+                            logger.info(
+                                f"[XGBoost] Skipping model for route {route.route_name} "
+                                f"(no per-route model; using formula fallback)"
+                            )
+                            eta = None
 
                         if eta is None:
                             if travel_time_sec:
