@@ -20,6 +20,7 @@ import logging
 import atexit
 import signal
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import requests
@@ -57,6 +58,7 @@ ETA_MODEL_PATH = os.path.join(os.path.dirname(__file__), "xgboost_eta_model.jobl
 GTFS_ZIP_PATH = os.path.join(os.path.dirname(__file__), "..", "itm_south_west_gtfs.zip")
 FUSION_INTERVAL = int(os.getenv("FUSION_INTERVAL", "10"))  # seconds
 LIVE_DATA_MAX_AGE_SECONDS = int(os.getenv("LIVE_DATA_MAX_AGE_SECONDS", "180"))
+STATUS_BODS_CACHE_SECONDS = int(os.getenv("STATUS_BODS_CACHE_SECONDS", "15"))
 ROUTE_PROXIMITY_THRESHOLD_KM = float(os.getenv("ROUTE_PROXIMITY_THRESHOLD_KM", "2.0"))
 LIVE_TRIP_MAX_EARLY_MINUTES = float(os.getenv("LIVE_TRIP_MAX_EARLY_MINUTES", "5"))
 LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25"))
@@ -935,6 +937,7 @@ def fetch_all_buses_for_route(route, all_vehicles: list | None = None):
 # ---------------------------------------------------------------------------
 _bods_bulk_cache: dict = {"vehicles": None, "cycle_id": -1}
 _bods_cycle_counter: int = 0
+_status_bods_cache: dict = {"vehicles": None, "fetched_at": None}
 
 
 def dedupe_bods_vehicles(vehicles: list[dict]) -> list[dict]:
@@ -953,6 +956,42 @@ def dedupe_bods_vehicles(vehicles: list[dict]) -> list[dict]:
         deduped[key] = vehicle
 
     return list(deduped.values())
+
+
+def fetch_bods_vehicles_uncached(log_context: str) -> list[dict]:
+    """Fetch a fresh BODS vehicle snapshot without using the fusion cache."""
+    if not BODS_API_KEY:
+        logger.warning("[BODS] API key not set â€” no live bus data available")
+        return []
+
+    try:
+        vehicles = []
+
+        if BODS_OPERATOR_ALLOWLIST:
+            logger.info(
+                f"[BODS] {log_context}: batching by operator "
+                f"({', '.join(BODS_OPERATOR_ALLOWLIST)})"
+            )
+            for operator_ref in BODS_OPERATOR_ALLOWLIST:
+                operator_vehicles = fetch_bods_vehicles(
+                    api_key=BODS_API_KEY,
+                    operator_ref=operator_ref,
+                )
+                logger.info(
+                    f"[BODS] {log_context}: operator {operator_ref} returned "
+                    f"{len(operator_vehicles)} raw vehicles"
+                )
+                vehicles.extend(operator_vehicles)
+        else:
+            vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY)
+            logger.info(f"[BODS] {log_context}: {len(vehicles)} raw vehicles")
+
+        vehicles = dedupe_bods_vehicles(vehicles)
+        logger.info(f"[BODS] {log_context}: {len(vehicles)} deduped vehicles")
+        return vehicles
+    except Exception as exc:
+        logger.error(f"[BODS] {log_context} error: {exc}")
+        return []
 
 
 def fetch_bods_vehicles_bulk(cycle_id: int) -> list:
@@ -1010,6 +1049,29 @@ def fetch_bods_vehicles_bulk(cycle_id: int) -> list:
         logger.error(f"[BODS] Bulk fetch error: {exc}")
         _bods_bulk_cache = {"vehicles": [], "cycle_id": cycle_id}
         return []
+
+
+def fetch_bods_vehicles_status_snapshot() -> list[dict]:
+    """Fetch or reuse a short-lived BODS snapshot for status requests."""
+    global _status_bods_cache
+
+    fetched_at = _status_bods_cache.get("fetched_at")
+    now = datetime.now()
+    if (
+        _status_bods_cache["vehicles"] is not None
+        and fetched_at is not None
+        and (now - fetched_at).total_seconds() <= STATUS_BODS_CACHE_SECONDS
+    ):
+        logger.info(
+            "[BODS] Reusing status snapshot: %s vehicles (%ss old)",
+            len(_status_bods_cache["vehicles"]),
+            round((now - fetched_at).total_seconds(), 1),
+        )
+        return _status_bods_cache["vehicles"]
+
+    vehicles = fetch_bods_vehicles_uncached("Status snapshot")
+    _status_bods_cache = {"vehicles": vehicles, "fetched_at": now}
+    return vehicles
 
 
 # =========================================================================
@@ -1879,93 +1941,108 @@ def get_route_history(route_id):
     })
 
 
-@app.route("/api/status/<int:route_id>", methods=["GET"])
-def get_status(route_id):
-    """Return ALL buses for the route with their positions and ETAs."""
-    route = db.session.get(Route, route_id)
-    if not route:
-        return jsonify({"error": "Route not found"}), 404
-    
-    # Get the most recent timestamp for this route
-    latest_log = (
+def get_latest_logs_by_vehicle_for_route(route_id, vehicle_ids, lookback_hours=6):
+    """Return the newest recent BusLog for each requested vehicle on a route."""
+    valid_vehicle_ids = [vehicle_id for vehicle_id in vehicle_ids if vehicle_id and vehicle_id != "unknown"]
+    if not valid_vehicle_ids:
+        return {}
+
+    recent_cutoff = datetime.now() - timedelta(hours=lookback_hours)
+    logs = (
         BusLog.query
         .filter_by(route_id=route_id)
-        .order_by(BusLog.timestamp.desc())
-        .first()
-    )
-    
-    if latest_log is None:
-        return jsonify({"error": "No data yet for this route"}), 404
-
-    if not is_recent_live_timestamp(latest_log.timestamp):
-        return jsonify({
-            "route": route.to_dict(),
-            "bus_available": False,
-            "is_live": False,
-            "eta_method": "schedule_only",
-            "message": "No live bus currently available on this route",
-            "buses": [],
-            "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
-        }), 200
-
-    recent_cutoff = datetime.now(latest_log.timestamp.tzinfo) - timedelta(minutes=2)
-    
-    recent_logs = (
-        BusLog.query
-        .filter_by(route_id=route_id)
+        .filter(BusLog.vehicle_id.in_(valid_vehicle_ids))
         .filter(BusLog.timestamp >= recent_cutoff)
-        .filter(BusLog.bus_lat.isnot(None))
-        .filter(BusLog.bus_lng.isnot(None))
         .order_by(BusLog.timestamp.desc())
         .all()
     )
-    recent_logs = [
-        log for log in recent_logs
-        if is_position_plausible_for_timetable(route, log.bus_lat, log.bus_lng, log.timestamp)
-    ]
-    
-    # Group by vehicle_id to get unique buses
-    buses = {}
-    for log in recent_logs:
-        vid = log.vehicle_id or 'unknown'
-        if vid not in buses:
-            buses[vid] = log
-    
-    # Build bus list
+
+    latest_logs = {}
+    for log in logs:
+        if log.vehicle_id and log.vehicle_id not in latest_logs:
+            latest_logs[log.vehicle_id] = log
+
+    return latest_logs
+
+
+def build_status_bus_list_from_live_snapshot(route, all_vehicles=None):
+    """Build the status bus list from a fresh live BODS snapshot."""
+    live_vehicles = fetch_all_buses_for_route(route, all_vehicles=all_vehicles)
+    if not live_vehicles:
+        return []
+
+    latest_logs = get_latest_logs_by_vehicle_for_route(
+        route.id,
+        [vehicle.get("vehicle_id") for vehicle in live_vehicles],
+    )
+
     bus_list = []
-    for vehicle_id, log in buses.items():
-        # Calculate remaining stops
-        remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
-        current_eta, eta_method = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
-        delay_minutes = log.delay_minutes
-        if delay_minutes is None:
-            delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
-        
-        # Calculate predictions
-        stop_predictions = calculate_stop_predictions(
-            route_id, log.bus_lat, log.bus_lng, current_eta, log.timestamp
+    for vehicle_data in live_vehicles:
+        vehicle_id = vehicle_data.get("vehicle_id") or "unknown"
+        bus_lat = vehicle_data["lat"]
+        bus_lng = vehicle_data["lng"]
+        latest_log = latest_logs.get(vehicle_id)
+        vehicle_timestamp = (
+            parse_iso_datetime(vehicle_data.get("recorded_at"))
+            or (latest_log.timestamp if latest_log is not None else None)
+            or datetime.now(UK_TZ)
         )
 
-        operator = _latest_bus_metadata.get(vehicle_id, {}).get("operator")
-        if not operator and vehicle_id and "-" in vehicle_id:
-            operator = vehicle_id.split("-", 1)[0]
+        passenger_count = latest_log.passenger_count if latest_log and latest_log.passenger_count is not None else 0
+        traffic_delay = latest_log.traffic_delay if latest_log and latest_log.traffic_delay is not None else 0
+
+        remaining_stops, _, current_stop_seq = count_remaining_stops(route.id, bus_lat, bus_lng)
+        log_for_eta = SimpleNamespace(
+            bus_lat=bus_lat,
+            bus_lng=bus_lng,
+            passenger_count=passenger_count,
+            traffic_delay=traffic_delay,
+            predicted_eta=latest_log.predicted_eta if latest_log else None,
+            timestamp=vehicle_timestamp,
+        )
+        current_eta, eta_method = resolve_live_eta(route, log_for_eta, current_stop_seq, remaining_stops)
+
+        scheduled_service_time = latest_log.scheduled_service_time if latest_log else None
+        delay_minutes = latest_log.delay_minutes if latest_log else None
+        if scheduled_service_time is None or delay_minutes is None:
+            live_service_time, live_delay_minutes, _ = get_current_service_time(
+                route.id,
+                bus_lat,
+                bus_lng,
+                current_time=vehicle_timestamp,
+            )
+            if scheduled_service_time is None:
+                scheduled_service_time = live_service_time
+            if delay_minutes is None:
+                delay_minutes = live_delay_minutes
+
+        if delay_minutes is None:
+            delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
+
+        stop_predictions = calculate_stop_predictions(
+            route.id,
+            bus_lat,
+            bus_lng,
+            current_eta,
+            vehicle_timestamp,
+        )
 
         bus_list.append({
             "vehicle_id": vehicle_id,
-            "operator": operator or "unknown",
+            "operator": resolve_vehicle_operator(vehicle_data),
             "position": {
-                "lat": log.bus_lat,
-                "lng": log.bus_lng,
+                "lat": bus_lat,
+                "lng": bus_lng,
             },
             "eta": current_eta,
             "eta_method": eta_method,
-            "passenger_count": log.passenger_count,
-            "traffic_delay": log.traffic_delay,
-            "scheduled_service_time": log.scheduled_service_time,
+            "passenger_count": passenger_count,
+            "traffic_delay": traffic_delay,
+            "scheduled_service_time": scheduled_service_time,
             "delay_minutes": delay_minutes,
             "remaining_stops": remaining_stops,
             "current_stop_sequence": current_stop_seq,
-            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "timestamp": vehicle_timestamp.isoformat() if vehicle_timestamp else None,
             "stop_predictions": stop_predictions,
         })
 
@@ -1974,7 +2051,107 @@ def get_status(route_id):
         bus["eta"] if bus["eta"] is not None else float("inf"),
         bus.get("vehicle_id") or "",
     ))
-    
+    return bus_list
+
+
+@app.route("/api/status/<int:route_id>", methods=["GET"])
+def get_status(route_id):
+    """Return ALL buses for the route with their positions and ETAs."""
+    route = db.session.get(Route, route_id)
+    if not route:
+        return jsonify({"error": "Route not found"}), 404
+
+    latest_log = (
+        BusLog.query
+        .filter_by(route_id=route_id)
+        .order_by(BusLog.timestamp.desc())
+        .first()
+    )
+
+    live_snapshot = fetch_bods_vehicles_status_snapshot()
+    bus_list = build_status_bus_list_from_live_snapshot(route, all_vehicles=live_snapshot)
+
+    if not bus_list:
+        if latest_log is None:
+            return jsonify({"error": "No data yet for this route"}), 404
+
+        if not is_recent_live_timestamp(latest_log.timestamp):
+            return jsonify({
+                "route": route.to_dict(),
+                "bus_available": False,
+                "is_live": False,
+                "eta_method": "schedule_only",
+                "message": "No live bus currently available on this route",
+                "buses": [],
+                "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
+            }), 200
+
+        recent_cutoff = datetime.now(latest_log.timestamp.tzinfo) - timedelta(minutes=2)
+
+        recent_logs = (
+            BusLog.query
+            .filter_by(route_id=route_id)
+            .filter(BusLog.timestamp >= recent_cutoff)
+            .filter(BusLog.bus_lat.isnot(None))
+            .filter(BusLog.bus_lng.isnot(None))
+            .order_by(BusLog.timestamp.desc())
+            .all()
+        )
+        recent_logs = [
+            log for log in recent_logs
+            if is_position_plausible_for_timetable(route, log.bus_lat, log.bus_lng, log.timestamp)
+        ]
+
+        buses = {}
+        for log in recent_logs:
+            vehicle_id = log.vehicle_id or "unknown"
+            if vehicle_id not in buses:
+                buses[vehicle_id] = log
+
+        for vehicle_id, log in buses.items():
+            remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
+            current_eta, eta_method = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
+            delay_minutes = log.delay_minutes
+            if delay_minutes is None:
+                delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
+
+            stop_predictions = calculate_stop_predictions(
+                route_id,
+                log.bus_lat,
+                log.bus_lng,
+                current_eta,
+                log.timestamp,
+            )
+
+            operator = _latest_bus_metadata.get(vehicle_id, {}).get("operator")
+            if not operator and vehicle_id and "-" in vehicle_id:
+                operator = vehicle_id.split("-", 1)[0]
+
+            bus_list.append({
+                "vehicle_id": vehicle_id,
+                "operator": operator or "unknown",
+                "position": {
+                    "lat": log.bus_lat,
+                    "lng": log.bus_lng,
+                },
+                "eta": current_eta,
+                "eta_method": eta_method,
+                "passenger_count": log.passenger_count,
+                "traffic_delay": log.traffic_delay,
+                "scheduled_service_time": log.scheduled_service_time,
+                "delay_minutes": delay_minutes,
+                "remaining_stops": remaining_stops,
+                "current_stop_sequence": current_stop_seq,
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "stop_predictions": stop_predictions,
+            })
+
+        bus_list.sort(key=lambda bus: (
+            bus["eta"] is None,
+            bus["eta"] if bus["eta"] is not None else float("inf"),
+            bus.get("vehicle_id") or "",
+        ))
+
     if not bus_list:
         return jsonify({
             "route": route.to_dict(),
@@ -1983,11 +2160,15 @@ def get_status(route_id):
             "eta_method": "schedule_only",
             "message": "No bus currently available on this route",
             "buses": [],
-            "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
+            "timestamp": latest_log.timestamp.isoformat() if latest_log and latest_log.timestamp else None,
         }), 200
 
     unique_eta_methods = sorted({bus.get("eta_method") for bus in bus_list if bus.get("eta_method")})
     overall_eta_method = unique_eta_methods[0] if len(unique_eta_methods) == 1 else "mixed"
+    response_timestamp = max(
+        (bus.get("timestamp") for bus in bus_list if bus.get("timestamp")),
+        default=latest_log.timestamp.isoformat() if latest_log and latest_log.timestamp else None,
+    )
 
     return jsonify({
         "route": route.to_dict(),
@@ -1996,7 +2177,7 @@ def get_status(route_id):
         "eta_method": overall_eta_method,
         "bus_count": len(bus_list),
         "buses": bus_list,
-        "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
+        "timestamp": response_timestamp,
     })
 
 
