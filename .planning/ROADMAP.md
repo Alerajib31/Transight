@@ -44,8 +44,12 @@ Plans:
   3. On a mobile device, the map fills the screen and a bottom sheet slides up to show route info and stop details without obscuring the map
   4. On a desktop browser, the map and info panel sit side by side without overlap or layout breakage
   5. Every active stop across both routes shows a computed delay indicator based on predicted vs scheduled arrival
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Map flyTo on route switch + enhanced stop popup delay badges
+- [ ] 02-02-PLAN.md — Mobile bottom sheet layout + desktop side-by-side refinement
+- [ ] 02-03-PLAN.md — UI polish (route selector, card hierarchy, typography) + human verification
 
 ---
 
@@ -54,7 +58,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Backend Foundation | 4/4 | Complete |  |
-| 2. Multi-Route Frontend | 0/? | Not started | - |
+| 2. Multi-Route Frontend | 0/3 | In progress | - |
 
 ---
 
@@ -82,3 +86,4 @@ Plans:
 
 *Roadmap created: 2026-04-02*
 *Phase 1 planned: 2026-04-02 — 4 plans in 2 waves*
+*Phase 2 planned: 2026-04-03 — 3 plans in 2 waves*
