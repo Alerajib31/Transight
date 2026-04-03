@@ -62,6 +62,7 @@ STATUS_BODS_CACHE_SECONDS = int(os.getenv("STATUS_BODS_CACHE_SECONDS", "15"))
 ROUTE_PROXIMITY_THRESHOLD_KM = float(os.getenv("ROUTE_PROXIMITY_THRESHOLD_KM", "2.0"))
 LIVE_TRIP_MAX_EARLY_MINUTES = float(os.getenv("LIVE_TRIP_MAX_EARLY_MINUTES", "5"))
 LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25"))
+ORIGIN_STAGING_RADIUS_KM = float(os.getenv("ORIGIN_STAGING_RADIUS_KM", "0.15"))
 UK_TZ = ZoneInfo("Europe/London")
 
 _operator_allowlist = [op.strip() for op in os.getenv("BODS_OPERATOR_ALLOWLIST", "FBRI,FBRA").split(",") if op.strip()]
@@ -255,6 +256,29 @@ def is_position_plausible_for_timetable(route, current_lat, current_lng, current
     trip_stops = selected_trip.get("stops", [])
     if current_stop_seq < 0 or current_stop_seq >= len(trip_stops):
         return True
+
+    first_stop = trip_stops[0] if trip_stops else None
+    if first_stop and current_stop_seq == first_stop["sequence"]:
+        first_departure_dt = build_gtfs_datetime(
+            selected_trip["service_date"],
+            first_stop.get("departure_time") or first_stop["arrival_time"],
+        )
+        if first_departure_dt is not None:
+            first_departure_dt = first_departure_dt.replace(tzinfo=UK_TZ)
+            origin_distance_km = haversine(
+                current_lat,
+                current_lng,
+                first_stop["lat"],
+                first_stop["lng"],
+            )
+            if origin_distance_km <= ORIGIN_STAGING_RADIUS_KM and local_time < first_departure_dt:
+                logger.warning(
+                    f"[GTFS] Rejecting origin-staging bus for route {route.route_name} "
+                    f"({route.direction}) before trip start: "
+                    f"{origin_distance_km:.2f}km from first stop, "
+                    f"departure at {first_departure_dt.isoformat()}"
+                )
+                return False
 
     scheduled_dt = build_gtfs_datetime(
         selected_trip["service_date"],
@@ -961,7 +985,7 @@ def dedupe_bods_vehicles(vehicles: list[dict]) -> list[dict]:
 def fetch_bods_vehicles_uncached(log_context: str) -> list[dict]:
     """Fetch a fresh BODS vehicle snapshot without using the fusion cache."""
     if not BODS_API_KEY:
-        logger.warning("[BODS] API key not set â€” no live bus data available")
+        logger.warning("[BODS] API key not set — no live bus data available")
         return []
 
     try:
@@ -2087,7 +2111,6 @@ def get_status(route_id):
             }), 200
 
         recent_cutoff = datetime.now(latest_log.timestamp.tzinfo) - timedelta(minutes=2)
-
         recent_logs = (
             BusLog.query
             .filter_by(route_id=route_id)
