@@ -62,10 +62,7 @@ LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25")
 UK_TZ = ZoneInfo("Europe/London")
 
 _operator_allowlist = [op.strip() for op in os.getenv("BODS_OPERATOR_ALLOWLIST", "FBRI,FBRA").split(",") if op.strip()]
-if len(_operator_allowlist) >= 2:
-    BODS_OPERATOR_ALLOWLIST = tuple(dict.fromkeys(_operator_allowlist))[:2]
-else:
-    BODS_OPERATOR_ALLOWLIST = ("FBRI", "FBRA")
+BODS_OPERATOR_ALLOWLIST = tuple(dict.fromkeys(_operator_allowlist)) if _operator_allowlist else ("FBRI", "FBRA")
 
 # Bristol operator code (First Bristol = FBRI)
 BODS_OPERATOR = BODS_OPERATOR_ALLOWLIST[0]
@@ -711,79 +708,120 @@ def get_route_distance_tomtom(origin_lat, origin_lng, dest_lat, dest_lng):
 # =========================================================================
 # BODS Real-Time Bus Fetcher
 # =========================================================================
-def fetch_all_buses_for_route(route):
+def fetch_all_buses_for_route(route, all_vehicles: list | None = None):
     """
     Fetch ALL buses for a given route from BODS.
-    
+
+    When all_vehicles is provided (bulk-fetch path), filters the pre-fetched list
+    by line_ref for this route instead of making a new BODS HTTP request.
+
     Returns: List of vehicle data dicts, or empty list if no buses
     """
     route_name = route.route_name
     direction = route.direction
 
-    if not BODS_API_KEY:
-        logger.warning("[BODS] API key not set — no live bus data available")
-        return []
-
-    try:
-        # Fetch vehicles for this route and filter to the configured operators locally.
-        vehicles = fetch_bods_vehicles(
-            api_key=BODS_API_KEY,
-            line_ref=route_name,
-        )
-        
+    if all_vehicles is not None:
+        # Bulk-fetch path: filter the pre-fetched list by line_ref for this route
+        vehicles = [v for v in all_vehicles if (v.get("line") or "").strip() == route_name]
+        if not vehicles:
+            logger.info(f"[BODS] No vehicles for route {route_name} in bulk result")
+            return []
+        logger.info(f"[BODS] {len(vehicles)} vehicle(s) for {route_name} after line filter")
+    else:
+        # Legacy path: individual BODS call (used when all_vehicles not supplied)
+        if not BODS_API_KEY:
+            logger.warning("[BODS] API key not set — no live bus data available")
+            return []
+        try:
+            vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY, line_ref=route_name)
+        except Exception as exc:
+            logger.error(f"[BODS] Fetch error: {exc}")
+            return []
         if not vehicles:
             logger.warning(f"[BODS] No vehicles found for route {route_name}")
             return []
-        
         logger.info(f"[BODS] Found {len(vehicles)} vehicle(s) for route {route_name}")
-        logger.info(f"[BODS] Operator allowlist: {', '.join(BODS_OPERATOR_ALLOWLIST)}")
+    logger.info(f"[BODS] Operator allowlist: {', '.join(BODS_OPERATOR_ALLOWLIST)}")
 
-        allowed_operators = set(BODS_OPERATOR_ALLOWLIST)
-        vehicles = [
-            v for v in vehicles
-            if resolve_vehicle_operator(v) in allowed_operators
-        ]
+    allowed_operators = set(BODS_OPERATOR_ALLOWLIST)
+    vehicles = [
+        v for v in vehicles
+        if resolve_vehicle_operator(v) in allowed_operators
+    ]
 
-        if not vehicles:
-            logger.warning(f"[BODS] No vehicles matched operators {', '.join(BODS_OPERATOR_ALLOWLIST)}")
-            return []
+    if not vehicles:
+        logger.warning(f"[BODS] No vehicles matched operators {', '.join(BODS_OPERATOR_ALLOWLIST)}")
+        return []
 
-        vehicles = [
-            v for v in vehicles
-            if is_vehicle_live_for_route(v, route)
-        ]
+    vehicles = [
+        v for v in vehicles
+        if is_vehicle_live_for_route(v, route)
+    ]
 
-        if not vehicles:
-            logger.warning(f"[BODS] No recent Bristol-route vehicles found for route {route_name}")
-            return []
+    if not vehicles:
+        logger.warning(f"[BODS] No recent Bristol-route vehicles found for route {route_name}")
+        return []
 
-        # Filter by direction
-        direction_lower = direction.lower()
-        matching_vehicles = []
-        
-        for v in vehicles:
-            vehicle_direction = (v.get('direction') or '').lower()
-            destination = (v.get('destination') or '').lower()
-            
-            # Check direction match - either by direction field or destination
-            if (direction_lower in vehicle_direction or 
+    # Filter by direction
+    direction_lower = direction.lower()
+    matching_vehicles = []
+
+    for v in vehicles:
+        vehicle_direction = (v.get('direction') or '').lower()
+        destination = (v.get('destination') or '').lower()
+
+        # Check direction match - either by direction field or destination
+        if (direction_lower in vehicle_direction or
                 vehicle_direction == direction_lower or
                 direction_lower in destination):
-                matching_vehicles.append(v)
-        
-        # If no direction match, use all vehicles
-        if not matching_vehicles:
-            matching_vehicles = vehicles
-            logger.warning(f"[BODS] No direction match for {direction}, using all {len(vehicles)} vehicles")
-        
-        logger.info(f"[BODS] Returning {len(matching_vehicles)} matching vehicle(s)")
-        for v in matching_vehicles:
-            logger.info(f"  - Vehicle {v.get('vehicle_id')}: ({v['lat']:.5f}, {v['lng']:.5f}) to {v.get('destination')}")
-        
-        return matching_vehicles
-        
+            matching_vehicles.append(v)
+
+    # If no direction match, use all vehicles
+    if not matching_vehicles:
+        matching_vehicles = vehicles
+        logger.warning(f"[BODS] No direction match for {direction}, using all {len(vehicles)} vehicles")
+
+    logger.info(f"[BODS] Returning {len(matching_vehicles)} matching vehicle(s)")
+    for v in matching_vehicles:
+        logger.info(f"  - Vehicle {v.get('vehicle_id')}: ({v['lat']:.5f}, {v['lng']:.5f}) to {v.get('destination')}")
+
+    return matching_vehicles
+
+
+# ---------------------------------------------------------------------------
+# BODS Bulk Fetch Cache (one call per cycle, shared across all routes)
+# ---------------------------------------------------------------------------
+_bods_bulk_cache: dict = {"vehicles": None, "cycle_id": -1}
+_bods_cycle_counter: int = 0
+
+
+def fetch_bods_vehicles_bulk(cycle_id: int) -> list:
+    """
+    Fetch ALL vehicles for configured operators in ONE BODS call per Fusion cycle.
+    Result is cached by cycle_id so each route in the same cycle reuses it.
+    """
+    global _bods_bulk_cache
+
+    if _bods_bulk_cache["cycle_id"] == cycle_id and _bods_bulk_cache["vehicles"] is not None:
+        logger.info(
+            f"[BODS] Reusing bulk cache (cycle {cycle_id}): "
+            f"{len(_bods_bulk_cache['vehicles'])} vehicles"
+        )
+        return _bods_bulk_cache["vehicles"]
+
+    if not BODS_API_KEY:
+        logger.warning("[BODS] API key not set — no live bus data available")
+        _bods_bulk_cache = {"vehicles": [], "cycle_id": cycle_id}
+        return []
+
+    try:
+        vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY)  # no line_ref = all operators
+        logger.info(f"[BODS] Bulk fetch cycle {cycle_id}: {len(vehicles)} raw vehicles")
+        _bods_bulk_cache = {"vehicles": vehicles, "cycle_id": cycle_id}
+        return vehicles
     except Exception as exc:
-        logger.error(f"[BODS] Fetch error: {exc}")
+        logger.error(f"[BODS] Bulk fetch error: {exc}")
+        _bods_bulk_cache = {"vehicles": [], "cycle_id": cycle_id}
         return []
 
 
@@ -1276,11 +1314,16 @@ def fusion_engine():
                     time.sleep(FUSION_INTERVAL)
                     continue
 
+                # Single BODS call for this entire cycle — fanned out per route below
+                global _bods_cycle_counter
+                _bods_cycle_counter += 1
+                all_vehicles = fetch_bods_vehicles_bulk(_bods_cycle_counter)
+
                 for route in routes:
                     logger.info(f"\n[Fusion] === Route {route.route_name} ({route.direction}) ===")
 
                     # Step 1 — Fetch ALL buses for this route
-                    vehicles = fetch_all_buses_for_route(route)
+                    vehicles = fetch_all_buses_for_route(route, all_vehicles=all_vehicles)
                     
                     if not vehicles:
                         logger.warning(f"[Fusion] No live buses available for route {route.route_name}")
@@ -1314,11 +1357,12 @@ def fusion_engine():
                             "route_id": route.id,
                             "timestamp": datetime.now(),
                         }
-                        
-                        logger.info(f"\n[Fusion] -- Processing Bus {vehicle_id} --")
-                        logger.info(f"  Position: ({bus_lat:.5f}, {bus_lng:.5f})")
-                        logger.info(f"  Destination: {vehicle_data.get('destination')}")
-                        logger.info(f"  Operator: {operator}")
+
+                        tag = f"[Fusion:{route.route_name}:{route.direction[:3]}]"
+                        logger.info(f"\n{tag} -- Processing Bus {vehicle_id} --")
+                        logger.info(f"{tag}   Position: ({bus_lat:.5f}, {bus_lng:.5f})")
+                        logger.info(f"{tag}   Destination: {vehicle_data.get('destination')}")
+                        logger.info(f"{tag}   Operator: {operator}")
 
                         # Step 2 — Traffic from TomTom
                         traffic_delay = fetch_traffic_delay(bus_lat, bus_lng)
@@ -1423,7 +1467,7 @@ def fusion_engine():
                         db.session.commit()
 
                         delay_str = f"{delay_minutes:.0f}min late" if delay_minutes and delay_minutes > 0 else "on time"
-                        logger.info(f"[Fusion] Bus {vehicle_id}: ETA={eta}min | {delay_str}")
+                        logger.info(f"{tag} Bus {vehicle_id}: ETA={eta}min | {delay_str}")
                     logger.info(
                         f"[Fusion] Result: ETA={eta}min | Dist={distance_km:.2f}km | "
                         f"Crowd={passenger_count} | Traffic={traffic_delay:.0f}s | "
