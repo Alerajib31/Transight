@@ -59,10 +59,12 @@ GTFS_ZIP_PATH = os.path.join(os.path.dirname(__file__), "..", "itm_south_west_gt
 FUSION_INTERVAL = int(os.getenv("FUSION_INTERVAL", "10"))  # seconds
 LIVE_DATA_MAX_AGE_SECONDS = int(os.getenv("LIVE_DATA_MAX_AGE_SECONDS", "180"))
 STATUS_BODS_CACHE_SECONDS = int(os.getenv("STATUS_BODS_CACHE_SECONDS", "15"))
+STATUS_LOG_FALLBACK_GRACE_SECONDS = int(os.getenv("STATUS_LOG_FALLBACK_GRACE_SECONDS", "120"))
 ROUTE_PROXIMITY_THRESHOLD_KM = float(os.getenv("ROUTE_PROXIMITY_THRESHOLD_KM", "2.0"))
 LIVE_TRIP_MAX_EARLY_MINUTES = float(os.getenv("LIVE_TRIP_MAX_EARLY_MINUTES", "5"))
 LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25"))
 ORIGIN_STAGING_RADIUS_KM = float(os.getenv("ORIGIN_STAGING_RADIUS_KM", "0.15"))
+ORIGIN_EARLY_DISPLAY_MINUTES = float(os.getenv("ORIGIN_EARLY_DISPLAY_MINUTES", "4"))
 UK_TZ = ZoneInfo("Europe/London")
 
 _operator_allowlist = [op.strip() for op in os.getenv("BODS_OPERATOR_ALLOWLIST", "FBRI,FBRA").split(",") if op.strip()]
@@ -265,17 +267,24 @@ def is_position_plausible_for_timetable(route, current_lat, current_lng, current
         )
         if first_departure_dt is not None:
             first_departure_dt = first_departure_dt.replace(tzinfo=UK_TZ)
+            display_window_dt = first_departure_dt - timedelta(
+                minutes=ORIGIN_EARLY_DISPLAY_MINUTES
+            )
             origin_distance_km = haversine(
                 current_lat,
                 current_lng,
                 first_stop["lat"],
                 first_stop["lng"],
             )
-            if origin_distance_km <= ORIGIN_STAGING_RADIUS_KM and local_time < first_departure_dt:
+            if (
+                origin_distance_km <= ORIGIN_STAGING_RADIUS_KM
+                and local_time < display_window_dt
+            ):
                 logger.warning(
                     f"[GTFS] Rejecting origin-staging bus for route {route.route_name} "
-                    f"({route.direction}) before trip start: "
+                    f"({route.direction}) before display window: "
                     f"{origin_distance_km:.2f}km from first stop, "
+                    f"display from {display_window_dt.isoformat()}, "
                     f"departure at {first_departure_dt.isoformat()}"
                 )
                 return False
@@ -2133,86 +2142,277 @@ def get_latest_logs_by_vehicle_for_route(route_id, vehicle_ids, lookback_hours=6
     return latest_logs
 
 
-def build_status_bus_list_from_live_snapshot(route, all_vehicles=None):
-    """Build the status bus list from a fresh live BODS snapshot."""
+def get_recent_logs_by_vehicle_for_route(route_id, max_age_seconds=STATUS_LOG_FALLBACK_GRACE_SECONDS,
+                                         current_time=None):
+    """Return the newest recent BusLog for each live vehicle on a route."""
+    local_now = to_uk_datetime(current_time)
+    recent_cutoff = local_now - timedelta(seconds=max_age_seconds)
+
+    logs = (
+        BusLog.query
+        .filter_by(route_id=route_id)
+        .filter(BusLog.timestamp >= recent_cutoff)
+        .filter(BusLog.vehicle_id.isnot(None))
+        .filter(BusLog.bus_lat.isnot(None))
+        .filter(BusLog.bus_lng.isnot(None))
+        .order_by(BusLog.timestamp.desc())
+        .all()
+    )
+
+    latest_logs = {}
+    for log in logs:
+        vehicle_id = (log.vehicle_id or "").strip()
+        if not vehicle_id or vehicle_id == "unknown":
+            continue
+        if (
+            vehicle_id not in latest_logs
+            and is_recent_live_timestamp(log.timestamp, max_age_seconds=max_age_seconds)
+        ):
+            latest_logs[vehicle_id] = log
+
+    return latest_logs
+
+
+def resolve_operator_for_vehicle(vehicle_id, fallback_operator=None):
+    """Resolve a vehicle operator using explicit data, cached metadata, or the ID prefix."""
+    if fallback_operator and fallback_operator != "unknown":
+        return fallback_operator
+
+    operator = _latest_bus_metadata.get(vehicle_id, {}).get("operator")
+    if operator:
+        return operator
+
+    if vehicle_id and "-" in vehicle_id:
+        return vehicle_id.split("-", 1)[0] or "unknown"
+
+    return "unknown"
+
+
+def is_trip_effectively_finished(route, current_lat, current_lng, current_time,
+                                 current_stop_seq=None, remaining_stops=None):
+    """Return True when a fallback bus is effectively at the final stop and due/finished."""
+    if route is None or current_lat is None or current_lng is None:
+        return False
+
+    if current_stop_seq is None or remaining_stops is None:
+        remaining_stops, _, current_stop_seq = count_remaining_stops(
+            route.id,
+            current_lat,
+            current_lng,
+        )
+
+    if remaining_stops is None or remaining_stops > 0:
+        return False
+
+    local_time = to_uk_datetime(current_time)
+    selected_trip = get_gtfs_schedule_trip(
+        route,
+        current_time=local_time,
+        current_stop_seq=current_stop_seq,
+        mode="live",
+    )
+    if not selected_trip:
+        return False
+
+    trip_stops = selected_trip.get("stops", [])
+    if not trip_stops:
+        return False
+
+    final_stop = trip_stops[-1]
+    final_sched_dt = build_gtfs_datetime(
+        selected_trip["service_date"],
+        final_stop["arrival_time"],
+    )
+    if final_sched_dt is None:
+        return False
+
+    final_sched_dt = final_sched_dt.replace(tzinfo=UK_TZ)
+    terminal_distance_km = haversine(
+        current_lat,
+        current_lng,
+        final_stop["lat"],
+        final_stop["lng"],
+    )
+    return (
+        current_stop_seq >= final_stop["sequence"]
+        and terminal_distance_km <= ORIGIN_STAGING_RADIUS_KM
+        and local_time >= final_sched_dt
+    )
+
+
+def is_log_eligible_for_status_fallback(route, log, current_time=None):
+    """Return True when a recent BusLog row is safe to reuse for live status."""
+    if log is None:
+        return False
+
+    vehicle_id = (log.vehicle_id or "").strip()
+    if not vehicle_id or vehicle_id == "unknown":
+        return False
+
+    if log.bus_lat is None or log.bus_lng is None or log.timestamp is None:
+        return False
+
+    if not is_recent_live_timestamp(
+        log.timestamp,
+        max_age_seconds=STATUS_LOG_FALLBACK_GRACE_SECONDS,
+    ):
+        return False
+
+    if not is_position_plausible_for_timetable(route, log.bus_lat, log.bus_lng, log.timestamp):
+        return False
+
+    remaining_stops, _, current_stop_seq = count_remaining_stops(route.id, log.bus_lat, log.bus_lng)
+    if is_trip_effectively_finished(
+        route,
+        log.bus_lat,
+        log.bus_lng,
+        log.timestamp if current_time is None else current_time,
+        current_stop_seq=current_stop_seq,
+        remaining_stops=remaining_stops,
+    ):
+        logger.info(
+            "[Status] Skipping fallback log for route %s (%s) vehicle %s: trip effectively finished",
+            route.route_name,
+            route.direction,
+            vehicle_id,
+        )
+        return False
+
+    return True
+
+
+def build_status_bus_entry(route, vehicle_id, operator, bus_lat, bus_lng, vehicle_timestamp,
+                           latest_log=None):
+    """Build a status payload for a single bus using live coordinates plus latest enrichment."""
+    vehicle_timestamp = vehicle_timestamp or (latest_log.timestamp if latest_log is not None else datetime.now(UK_TZ))
+    passenger_count = latest_log.passenger_count if latest_log and latest_log.passenger_count is not None else 0
+    traffic_delay = latest_log.traffic_delay if latest_log and latest_log.traffic_delay is not None else 0
+
+    remaining_stops, _, current_stop_seq = count_remaining_stops(route.id, bus_lat, bus_lng)
+    log_for_eta = SimpleNamespace(
+        vehicle_id=vehicle_id,
+        bus_lat=bus_lat,
+        bus_lng=bus_lng,
+        passenger_count=passenger_count,
+        traffic_delay=traffic_delay,
+        predicted_eta=latest_log.predicted_eta if latest_log else None,
+        timestamp=vehicle_timestamp,
+    )
+    current_eta, eta_method = resolve_live_eta(route, log_for_eta, current_stop_seq, remaining_stops)
+
+    scheduled_service_time = latest_log.scheduled_service_time if latest_log else None
+    delay_minutes = latest_log.delay_minutes if latest_log else None
+    if scheduled_service_time is None or delay_minutes is None:
+        live_service_time, live_delay_minutes, _ = get_current_service_time(
+            route.id,
+            bus_lat,
+            bus_lng,
+            current_time=vehicle_timestamp,
+        )
+        if scheduled_service_time is None:
+            scheduled_service_time = live_service_time
+        if delay_minutes is None:
+            delay_minutes = live_delay_minutes
+
+    if delay_minutes is None:
+        delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
+
+    stop_predictions = calculate_stop_predictions(
+        route.id,
+        bus_lat,
+        bus_lng,
+        current_eta,
+        vehicle_timestamp,
+    )
+
+    return {
+        "vehicle_id": vehicle_id,
+        "operator": resolve_operator_for_vehicle(vehicle_id, operator),
+        "position": {
+            "lat": bus_lat,
+            "lng": bus_lng,
+        },
+        "eta": current_eta,
+        "eta_method": eta_method,
+        "passenger_count": passenger_count,
+        "traffic_delay": traffic_delay,
+        "scheduled_service_time": scheduled_service_time,
+        "delay_minutes": delay_minutes,
+        "remaining_stops": remaining_stops,
+        "current_stop_sequence": current_stop_seq,
+        "timestamp": vehicle_timestamp.isoformat() if vehicle_timestamp else None,
+        "stop_predictions": stop_predictions,
+    }
+
+
+def build_status_bus_list_from_live_snapshot(route, all_vehicles=None, current_time=None):
+    """Build the status bus list from live BODS buses plus recent per-vehicle fallback logs."""
     live_vehicles = fetch_all_buses_for_route(route, all_vehicles=all_vehicles)
-    if not live_vehicles:
-        return []
+    recent_logs = get_recent_logs_by_vehicle_for_route(
+        route.id,
+        current_time=current_time,
+    )
+    candidate_vehicle_ids = {
+        vehicle.get("vehicle_id")
+        for vehicle in live_vehicles
+        if vehicle.get("vehicle_id")
+    } | set(recent_logs.keys())
 
     latest_logs = get_latest_logs_by_vehicle_for_route(
         route.id,
-        [vehicle.get("vehicle_id") for vehicle in live_vehicles],
+        list(candidate_vehicle_ids),
     )
+    for vehicle_id, log in recent_logs.items():
+        latest_logs.setdefault(vehicle_id, log)
 
     bus_list = []
+    seen_vehicle_ids = set()
     for vehicle_data in live_vehicles:
         vehicle_id = vehicle_data.get("vehicle_id") or "unknown"
-        bus_lat = vehicle_data["lat"]
-        bus_lng = vehicle_data["lng"]
+        seen_vehicle_ids.add(vehicle_id)
         latest_log = latest_logs.get(vehicle_id)
         vehicle_timestamp = (
             parse_iso_datetime(vehicle_data.get("recorded_at"))
             or (latest_log.timestamp if latest_log is not None else None)
             or datetime.now(UK_TZ)
         )
-
-        passenger_count = latest_log.passenger_count if latest_log and latest_log.passenger_count is not None else 0
-        traffic_delay = latest_log.traffic_delay if latest_log and latest_log.traffic_delay is not None else 0
-
-        remaining_stops, _, current_stop_seq = count_remaining_stops(route.id, bus_lat, bus_lng)
-        log_for_eta = SimpleNamespace(
-            bus_lat=bus_lat,
-            bus_lng=bus_lng,
-            passenger_count=passenger_count,
-            traffic_delay=traffic_delay,
-            predicted_eta=latest_log.predicted_eta if latest_log else None,
-            timestamp=vehicle_timestamp,
-        )
-        current_eta, eta_method = resolve_live_eta(route, log_for_eta, current_stop_seq, remaining_stops)
-
-        scheduled_service_time = latest_log.scheduled_service_time if latest_log else None
-        delay_minutes = latest_log.delay_minutes if latest_log else None
-        if scheduled_service_time is None or delay_minutes is None:
-            live_service_time, live_delay_minutes, _ = get_current_service_time(
-                route.id,
-                bus_lat,
-                bus_lng,
-                current_time=vehicle_timestamp,
-            )
-            if scheduled_service_time is None:
-                scheduled_service_time = live_service_time
-            if delay_minutes is None:
-                delay_minutes = live_delay_minutes
-
-        if delay_minutes is None:
-            delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
-
-        stop_predictions = calculate_stop_predictions(
-            route.id,
-            bus_lat,
-            bus_lng,
-            current_eta,
+        bus_list.append(build_status_bus_entry(
+            route,
+            vehicle_id,
+            resolve_vehicle_operator(vehicle_data),
+            vehicle_data["lat"],
+            vehicle_data["lng"],
             vehicle_timestamp,
-        )
+            latest_log=latest_log,
+        ))
 
-        bus_list.append({
-            "vehicle_id": vehicle_id,
-            "operator": resolve_vehicle_operator(vehicle_data),
-            "position": {
-                "lat": bus_lat,
-                "lng": bus_lng,
-            },
-            "eta": current_eta,
-            "eta_method": eta_method,
-            "passenger_count": passenger_count,
-            "traffic_delay": traffic_delay,
-            "scheduled_service_time": scheduled_service_time,
-            "delay_minutes": delay_minutes,
-            "remaining_stops": remaining_stops,
-            "current_stop_sequence": current_stop_seq,
-            "timestamp": vehicle_timestamp.isoformat() if vehicle_timestamp else None,
-            "stop_predictions": stop_predictions,
-        })
+    for vehicle_id, fallback_log in sorted(
+        recent_logs.items(),
+        key=lambda item: item[1].timestamp.timestamp() if item[1].timestamp else 0,
+        reverse=True,
+    ):
+        if vehicle_id in seen_vehicle_ids:
+            continue
+        if not is_log_eligible_for_status_fallback(route, fallback_log, current_time=current_time):
+            continue
+
+        logger.info(
+            "[Status] Using recent fallback log for route %s (%s) vehicle %s at %s",
+            route.route_name,
+            route.direction,
+            vehicle_id,
+            fallback_log.timestamp.isoformat() if fallback_log.timestamp else "unknown",
+        )
+        bus_list.append(build_status_bus_entry(
+            route,
+            vehicle_id,
+            resolve_operator_for_vehicle(vehicle_id),
+            fallback_log.bus_lat,
+            fallback_log.bus_lng,
+            fallback_log.timestamp,
+            latest_log=latest_logs.get(vehicle_id, fallback_log),
+        ))
+        seen_vehicle_ids.add(vehicle_id)
 
     bus_list.sort(key=lambda bus: (
         bus["eta"] is None,
@@ -2237,7 +2437,11 @@ def get_status(route_id):
     )
 
     live_snapshot = fetch_bods_vehicles_status_snapshot()
-    bus_list = build_status_bus_list_from_live_snapshot(route, all_vehicles=live_snapshot)
+    bus_list = build_status_bus_list_from_live_snapshot(
+        route,
+        all_vehicles=live_snapshot,
+        current_time=datetime.now(UK_TZ),
+    )
 
     if not bus_list:
         if latest_log is None:
@@ -2253,71 +2457,6 @@ def get_status(route_id):
                 "buses": [],
                 "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
             }), 200
-
-        recent_cutoff = datetime.now(latest_log.timestamp.tzinfo) - timedelta(minutes=2)
-        recent_logs = (
-            BusLog.query
-            .filter_by(route_id=route_id)
-            .filter(BusLog.timestamp >= recent_cutoff)
-            .filter(BusLog.bus_lat.isnot(None))
-            .filter(BusLog.bus_lng.isnot(None))
-            .order_by(BusLog.timestamp.desc())
-            .all()
-        )
-        recent_logs = [
-            log for log in recent_logs
-            if is_position_plausible_for_timetable(route, log.bus_lat, log.bus_lng, log.timestamp)
-        ]
-
-        buses = {}
-        for log in recent_logs:
-            vehicle_id = log.vehicle_id or "unknown"
-            if vehicle_id not in buses:
-                buses[vehicle_id] = log
-
-        for vehicle_id, log in buses.items():
-            remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
-            current_eta, eta_method = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
-            delay_minutes = log.delay_minutes
-            if delay_minutes is None:
-                delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
-
-            stop_predictions = calculate_stop_predictions(
-                route_id,
-                log.bus_lat,
-                log.bus_lng,
-                current_eta,
-                log.timestamp,
-            )
-
-            operator = _latest_bus_metadata.get(vehicle_id, {}).get("operator")
-            if not operator and vehicle_id and "-" in vehicle_id:
-                operator = vehicle_id.split("-", 1)[0]
-
-            bus_list.append({
-                "vehicle_id": vehicle_id,
-                "operator": operator or "unknown",
-                "position": {
-                    "lat": log.bus_lat,
-                    "lng": log.bus_lng,
-                },
-                "eta": current_eta,
-                "eta_method": eta_method,
-                "passenger_count": log.passenger_count,
-                "traffic_delay": log.traffic_delay,
-                "scheduled_service_time": log.scheduled_service_time,
-                "delay_minutes": delay_minutes,
-                "remaining_stops": remaining_stops,
-                "current_stop_sequence": current_stop_seq,
-                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                "stop_predictions": stop_predictions,
-            })
-
-        bus_list.sort(key=lambda bus: (
-            bus["eta"] is None,
-            bus["eta"] if bus["eta"] is not None else float("inf"),
-            bus.get("vehicle_id") or "",
-        ))
 
     if not bus_list:
         return jsonify({
