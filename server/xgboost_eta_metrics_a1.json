@@ -1,0 +1,31 @@
+{
+  "route_name": "A1",
+  "input_rows": 4199,
+  "real_samples": 199,
+  "synthetic_samples": 4000,
+  "training_samples": 3359,
+  "test_samples": 840,
+  "mae_minutes": 1.9229,
+  "rmse_minutes": 2.4837,
+  "feature_columns": [
+    "passenger_count",
+    "traffic_delay",
+    "hour",
+    "day_of_week",
+    "current_stop_sequence",
+    "remaining_stops",
+    "total_stops",
+    "progress_ratio"
+  ],
+  "feature_importance": {
+    "passenger_count": 0.005573,
+    "traffic_delay": 0.008845,
+    "hour": 0.001373,
+    "day_of_week": 0.00104,
+    "current_stop_sequence": 0.003175,
+    "remaining_stops": 0.187843,
+    "total_stops": 0.018287,
+    "progress_ratio": 0.773865
+  },
+  "model_path": "C:\\Users\\rajib\\Downloads\\Transight2\\server\\xgboost_eta_model_a1.joblib"
+}

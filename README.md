@@ -1,162 +1,142 @@
-# Transight AI — Phase 2 MVP
+# Transight AI - Phase 2 MVP
 
-> Real-Time Digital Twin for Bristol Bus Services.
+Real-time bus tracking and ETA prediction for Bristol bus services.
 
-## Current Release
+## Current Scope
 
-This repository is frozen at the Route 72 MVP handoff state. The current Flask + React + PostgreSQL stack is the shippable version in this branch. Future architecture work stays in `NEXT_STEPS.md`.
+The current MVP tracks:
 
-```
-Transight2/
-├── dev.nix                 # Nix environment (PostgreSQL, Python, Node, ffmpeg)
-├── server/
-│   ├── requirements.txt    # Python dependencies
-│   ├── models.py           # SQLAlchemy models (Route, BusLog)
-│   ├── app.py              # Flask API + Fusion Engine
-│   ├── seed.py             # Database seeder (2 × Route 72)
-│   └── bus_queue.mp4       # ← Place your video file here
-└── client/
-    ├── package.json
-    ├── vite.config.js
-    ├── index.html
-    └── src/
-        ├── main.jsx
-        ├── App.jsx         # Dashboard + Map
-        └── index.css       # Tailwind v4 + dark theme
-```
+- Route `72` outbound and inbound
+- Route `A1` outbound and inbound
 
----
+The stack is:
 
-## Prerequisites
+- `client/`: React 19 + Vite 7 + Tailwind v4 + Leaflet
+- `server/`: Flask API + Fusion Engine background thread + SQLAlchemy
+- PostgreSQL for routes, stops, and historical `BusLog` data
+- Live inputs from BODS, TomTom, GTFS, and YOLOv8
 
-| Tool       | Version |
-|------------|---------|
-| Python     | 3.11+   |
-| Node.js    | 20+     |
-| PostgreSQL | 15+     |
-| ffmpeg     | any     |
-
----
+ETA prediction now uses route-specific XGBoost models as the primary path for both `72` and `A1`, with formula-based ETA kept as a resilience fallback if a model is missing or prediction fails.
 
 ## Quick Start
 
-### 1. Environment
+### 1. Configure environment
 
-The backend now auto-loads the project `.env` file from the repo root, so the checked-in local config works without manual exports.
+The backend auto-loads the repo-root `.env` file. Process environment variables still override it if needed.
 
-```powershell
-$env:DATABASE_URL="postgresql://postgres:R%40jibale3138@localhost:5432/transight_db"
-$env:BODS_API_KEY="your_bods_api_key_here"
-$env:TOMTOM_API_KEY="your_tomtom_traffic_key_here"
-$env:TOMTOM_ROUTING_KEY="your_tomtom_routing_key_here"
-$env:VIDEO_PATH="bus_queue.mp4"
-$env:FUSION_INTERVAL="10"
-```
+Important variables:
 
-Process environment variables still win if you want to override `.env` for a single session.
+- `DATABASE_URL`
+- `BODS_API_KEY`
+- `TOMTOM_API_KEY`
+- `TOMTOM_ROUTING_KEY`
+- `VIDEO_PATH`
+- `FUSION_INTERVAL`
 
-### 2. Database
+### 2. Create the database
 
 ```bash
-# Create the database if it does not already exist
 cd server
 py -3 setup_db.py
 ```
 
-### 3. Backend
+### 3. Seed routes
 
 ```bash
 cd server
-pip install -r requirements.txt
-py -3 seed.py          # Seeds 2 routes
-py -3 app.py           # Starts Flask on :5000 + Fusion Engine
+py -3 seed.py
+py -3 seed_a1.py
 ```
 
-### 4. Frontend
+### 4. Optional: load GTFS data
+
+```bash
+cd server
+py -3 gtfs_loader.py ../itm_south_west_gtfs.zip
+```
+
+### 5. Train ETA models
+
+```bash
+cd server
+py -3 train_xgboost.py --route 72
+py -3 train_xgboost.py --route A1
+```
+
+This produces:
+
+- `server/xgboost_eta_model_72.joblib`
+- `server/xgboost_eta_model_a1.joblib`
+- `server/xgboost_eta_metrics_72.json`
+- `server/xgboost_eta_metrics_a1.json`
+
+For Route `72`, training also refreshes the legacy compatibility artifact:
+
+- `server/xgboost_eta_model.joblib`
+- `server/xgboost_eta_metrics.json`
+
+### 6. Start the backend
+
+```bash
+cd server
+py -3 app.py
+```
+
+### 7. Start the frontend
 
 ```bash
 cd client
 npm install
-npm run dev             # Starts Vite on :3000
+npm run dev
 ```
 
-Open **http://localhost:3000** in your browser.
+Open `http://localhost:3000`.
 
-### Windows One-Command Start
+## Development Helpers
+
+Windows one-command start:
 
 ```powershell
 .\start-dev.ps1
 ```
 
-That opens one PowerShell window for Flask and one for Vite. If `.tools/node-v20.20.2-win-x64` exists, the frontend uses that local Node runtime automatically.
-
-### Windows Local Node Shell
+Windows local Node shell:
 
 ```powershell
 . .\use-local-node.ps1
 ```
 
-That prepends the repo-local Node 20 runtime to your current PowerShell session so `npm run build` and `npm run dev` use the Vite-safe version.
+## API Summary
 
----
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/routes` | `GET` | List configured routes |
+| `/api/routes/<route_id>/stops` | `GET` | Ordered stops for a route |
+| `/api/routes/<route_id>/predictions` | `GET` | Stop-by-stop timetable or live predictions |
+| `/api/routes/<route_id>/history` | `GET` | Recent BusLog history for charts/debugging |
+| `/api/status/<route_id>` | `GET` | Current live bus status for a route |
 
-## Environment Variables
+Live ETA responses now include an `eta_method` field so you can verify whether the current ETA came from:
 
-| Variable         | Default                                              | Purpose                    |
-|------------------|------------------------------------------------------|----------------------------|
-| `DATABASE_URL`   | `postgresql://postgres:R%40jibale3138@localhost:5432/transight_db` | PostgreSQL connection      |
-| `BODS_API_KEY`   | required for live GPS, optional for schedule-only fallback | Bus Open Data Service key  |
-| `TOMTOM_API_KEY` | required for live traffic, optional for schedule-only fallback | TomTom Traffic API key     |
-| `TOMTOM_ROUTING_KEY` | required for routing ETA estimates, optional for schedule-only fallback | TomTom Routing API key |
-| `VIDEO_PATH`     | `bus_queue.mp4`                                      | Simulated camera feed      |
-| `FUSION_INTERVAL`| `10`                                                 | Seconds between cycles     |
+- `xgboost`
+- `formula_fallback`
+- `schedule_only`
 
----
+## Model Training Notes
 
-## API Reference
-
-| Endpoint               | Method | Description                          |
-|------------------------|--------|--------------------------------------|
-| `/api/routes`          | GET    | All configured routes (for dropdown) |
-| `/api/routes/<route_id>/stops` | GET | Ordered stops for a route |
-| `/api/routes/<route_id>/predictions` | GET | Stop-by-stop timetable or live predictions |
-| `/api/routes/<route_id>/history` | GET | Recent `BusLog` samples for charts |
-| `/api/status/<route_id>` | GET  | Latest fused status for a route      |
-
----
+- Real training rows are filtered by `Route.route_name`, so `72` and `A1` each get their own model.
+- Synthetic augmentation is now generated in memory and does not delete or overwrite `BusLog`.
+- Training fails clearly if there are not enough real `BusLog` rows for the requested route before augmentation.
 
 ## Notes
 
-- The backend and `setup_db.py` auto-load the repo-root `.env` file when present.
-- If the live API keys are missing, the app still starts and falls back to schedule-only behavior where possible.
-- On Windows in this repo, use `py -3` instead of `python` if `python` is not on `PATH`.
+- If BODS or TomTom keys are unavailable, the app still starts and falls back where possible.
+- The backend batches BODS requests by allowed operators instead of using the unrestricted national feed.
+- On Windows, prefer `py -3` if `python` is not on `PATH`.
 
----
+## Remaining Roadmap
 
-## Architecture
-
-```
-┌──────────────┐  HTTP/JSON  ┌──────────────┐  SQL  ┌──────────────┐
-│  React App   │◄──────────►│  Flask API   │◄─────►│  PostgreSQL  │
-│  (Port 3000) │             │  (Port 5000) │       │  (Port 5432) │
-└──────────────┘             └──────┬───────┘       └──────────────┘
-                                    │
-                        ┌───────────┴───────────┐
-                        │   Fusion Engine       │
-                        │   (Background Thread) │
-                        ├───────────────────────┤
-                        │ ► BODS GPS Fetch      │
-                        │ ► TomTom Traffic      │
-                        │ ► YOLOv8 Crowd Count  │
-                        │ ► ETA Calculation     │
-                        └───────────────────────┘
-```
-
----
-
-## Later Roadmap
-
-- [ ] XGBoost ETA prediction model (replaces math formula)
-- [ ] Historical trend charts
-- [ ] Multi-stop route visualisation
-- [ ] WebSocket live push
+- Historical trend charts
+- Multi-stop route visualization polish
+- WebSocket live push
+- Further route expansion beyond `72` and `A1`

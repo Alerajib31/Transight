@@ -91,7 +91,7 @@ CROWD_DETECTION_RADIUS_KM = 0.3  # 300 meters
 _crowd_history = {}
 MAX_CROWD_HISTORY = 3  # Average last 3 readings
 _latest_bus_metadata = {}
-_eta_model = None
+_eta_models: dict[str, object] = {}
 _tomtom_service_state = {
     "traffic": {
         "disabled": False,
@@ -271,25 +271,45 @@ def get_current_stop_context(route_stops, current_lat, current_lng):
     return current_stop_seq, current_stop, min_dist
 
 
-def load_eta_model():
-    """Load the trained XGBoost ETA model once per process."""
-    global _eta_model
+def get_eta_model_path(route_name: str) -> str:
+    """Return the expected model path for a route, with Route 72 legacy fallback."""
+    normalized = (route_name or "").strip().lower()
+    route_model_path = os.path.join(
+        os.path.dirname(__file__),
+        f"xgboost_eta_model_{normalized}.joblib",
+    )
+    if os.path.exists(route_model_path):
+        return route_model_path
 
-    if _eta_model is not None:
-        return _eta_model
+    if normalized == "72":
+        return ETA_MODEL_PATH
 
-    if not os.path.exists(ETA_MODEL_PATH):
-        logger.warning(f"[XGBoost] Model not found at {ETA_MODEL_PATH}; using formula fallback")
-        _eta_model = False
+    return route_model_path
+
+
+def load_eta_model(route_name: str):
+    """Load the trained XGBoost ETA model for a route once per process."""
+    cache_key = (route_name or "").strip().lower()
+    if cache_key in _eta_models:
+        return _eta_models[cache_key]
+
+    model_path = get_eta_model_path(cache_key)
+    if not os.path.exists(model_path):
+        logger.warning(
+            f"[XGBoost] Model not found for route {route_name} at {model_path}; "
+            "using formula fallback"
+        )
+        _eta_models[cache_key] = False
         return None
 
     try:
-        _eta_model = joblib.load(ETA_MODEL_PATH)
-        logger.info(f"[XGBoost] Loaded ETA model from {ETA_MODEL_PATH}")
-        return _eta_model
+        model = joblib.load(model_path)
+        logger.info(f"[XGBoost] Loaded ETA model for route {route_name} from {model_path}")
+        _eta_models[cache_key] = model
+        return model
     except Exception as exc:
-        logger.error(f"[XGBoost] Failed to load ETA model: {exc}")
-        _eta_model = False
+        logger.error(f"[XGBoost] Failed to load ETA model for route {route_name}: {exc}")
+        _eta_models[cache_key] = False
         return None
 
 
@@ -314,7 +334,8 @@ def build_eta_features(route, passenger_count, traffic_delay_seconds, current_st
 
 def predict_eta_xgboost(route, passenger_count, traffic_delay_seconds, current_stop_seq, remaining_stops, current_time):
     """Predict ETA using the trained model when available."""
-    model = load_eta_model()
+    route_name = getattr(route, "route_name", "unknown")
+    model = load_eta_model(route_name)
     if model is None or model is False:
         return None
 
@@ -339,21 +360,17 @@ def predict_eta_xgboost(route, passenger_count, traffic_delay_seconds, current_s
             features["progress_ratio"],
         ]]
         prediction = model.predict(ordered)[0]
+        logger.info(f"[XGBoost] Using model prediction for route {route_name}: {float(prediction):.1f} min")
         return round(float(prediction), 1)
     except Exception as exc:
-        logger.error(f"[XGBoost] Prediction failed: {exc}")
+        logger.error(f"[XGBoost] Prediction failed for route {route_name}: {exc}")
         return None
 
 
 def resolve_live_eta(route, log, current_stop_seq, remaining_stops):
     """Resolve the best ETA for a live bus using model first, then formula fallback."""
-    current_eta = log.predicted_eta
-
-    if current_eta is not None:
-        return current_eta
-
     if log.bus_lat is None or log.bus_lng is None:
-        return None
+        return log.predicted_eta, None
 
     current_eta = predict_eta_xgboost(
         route=route,
@@ -364,13 +381,17 @@ def resolve_live_eta(route, log, current_stop_seq, remaining_stops):
         current_time=log.timestamp or datetime.now(),
     )
     if current_eta is not None:
-        return current_eta
+        return current_eta, "xgboost"
 
-    return calculate_eta(
+    if log.predicted_eta is not None:
+        return log.predicted_eta, "formula_fallback"
+
+    fallback_eta = calculate_eta(
         haversine(log.bus_lat, log.bus_lng, route.dest_lat, route.dest_lng),
         log.traffic_delay or 0,
         log.passenger_count or 0,
     )
+    return fallback_eta, "formula_fallback"
 
 
 def calculate_route_delay(route, current_stop_seq, eta_min):
@@ -488,6 +509,7 @@ def build_schedule_only_response(route_id, route, current_time=None):
         "route": route.to_dict(),
         "service_time": service_time,
         "current_delay": None,
+        "eta_method": "schedule_only",
         "bus_available": False,
         "message": "No live bus currently available on this route",
         "is_live": False,
@@ -1461,23 +1483,15 @@ def fusion_engine():
 
                         # Step 6 — Calculate ETA with all factors
                         traffic_delay_seconds = traffic_delay or 0
-                        # XGBoost model is trained on Route 72 data only.
-                        # Gate it off for other routes until per-route models are available.
-                        if route.route_name == "72":
-                            eta = predict_eta_xgboost(
-                                route=route,
-                                passenger_count=passenger_count,
-                                traffic_delay_seconds=traffic_delay_seconds,
-                                current_stop_seq=current_stop_seq,
-                                remaining_stops=remaining_stops,
-                                current_time=datetime.now(),
-                            )
-                        else:
-                            logger.info(
-                                f"[XGBoost] Skipping model for route {route.route_name} "
-                                f"(no per-route model; using formula fallback)"
-                            )
-                            eta = None
+                        eta = predict_eta_xgboost(
+                            route=route,
+                            passenger_count=passenger_count,
+                            traffic_delay_seconds=traffic_delay_seconds,
+                            current_stop_seq=current_stop_seq,
+                            remaining_stops=remaining_stops,
+                            current_time=datetime.now(),
+                        )
+                        eta_method = "xgboost" if eta is not None else "formula_fallback"
 
                         if eta is None:
                             if travel_time_sec:
@@ -1499,6 +1513,13 @@ def fusion_engine():
                                     traffic_delay_seconds,
                                     passenger_count,
                                 )
+                        logger.info(
+                            "[Fusion] ETA resolved for route %s vehicle %s via %s: %.1f min",
+                            route.route_name,
+                            vehicle_id,
+                            eta_method,
+                            eta,
+                        )
 
                         delay_minutes = schedule_delay_min
                         if delay_minutes is None:
@@ -1655,7 +1676,7 @@ def get_route_predictions(route_id):
     
     # Calculate stop-by-step predictions
     remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
-    current_eta = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
+    current_eta, eta_method = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
 
     stop_predictions = calculate_stop_predictions(
         route_id, log.bus_lat, log.bus_lng, current_eta, log.timestamp
@@ -1682,6 +1703,7 @@ def get_route_predictions(route_id):
         "route": route.to_dict(),
         "service_time": service_time,
         "current_delay": current_delay,
+        "eta_method": eta_method,
         "bus_available": True,
         "is_live": True,
         "bus_position": {
@@ -1768,6 +1790,7 @@ def get_status(route_id):
             "route": route.to_dict(),
             "bus_available": False,
             "is_live": False,
+            "eta_method": "schedule_only",
             "message": "No live bus currently available on this route",
             "buses": [],
             "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
@@ -1801,7 +1824,7 @@ def get_status(route_id):
     for vehicle_id, log in buses.items():
         # Calculate remaining stops
         remaining_stops, _, current_stop_seq = count_remaining_stops(route_id, log.bus_lat, log.bus_lng)
-        current_eta = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
+        current_eta, eta_method = resolve_live_eta(route, log, current_stop_seq, remaining_stops)
         delay_minutes = log.delay_minutes
         if delay_minutes is None:
             delay_minutes = calculate_route_delay(route, current_stop_seq, current_eta)
@@ -1823,6 +1846,7 @@ def get_status(route_id):
                 "lng": log.bus_lng,
             },
             "eta": current_eta,
+            "eta_method": eta_method,
             "passenger_count": log.passenger_count,
             "traffic_delay": log.traffic_delay,
             "scheduled_service_time": log.scheduled_service_time,
@@ -1844,15 +1868,20 @@ def get_status(route_id):
             "route": route.to_dict(),
             "bus_available": False,
             "is_live": False,
+            "eta_method": "schedule_only",
             "message": "No bus currently available on this route",
             "buses": [],
             "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
         }), 200
 
+    unique_eta_methods = sorted({bus.get("eta_method") for bus in bus_list if bus.get("eta_method")})
+    overall_eta_method = unique_eta_methods[0] if len(unique_eta_methods) == 1 else "mixed"
+
     return jsonify({
         "route": route.to_dict(),
         "bus_available": True,
         "is_live": True,
+        "eta_method": overall_eta_method,
         "bus_count": len(bus_list),
         "buses": bus_list,
         "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
@@ -1866,7 +1895,8 @@ if __name__ == "__main__":
     with app.app_context():
         db.create_all()
         logger.info("[Startup] Database ready")
-        load_eta_model()
+        for route_name in sorted({route.route_name for route in Route.query.all() if route.route_name}):
+            load_eta_model(route_name)
         if os.path.exists(GTFS_ZIP_PATH):
             logger.info(f"[Startup] Warming GTFS cache from {GTFS_ZIP_PATH}")
             get_cached_gtfs_data(GTFS_ZIP_PATH)

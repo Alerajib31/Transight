@@ -4,12 +4,13 @@ Project memory for Claude Code in this repository.
 
 ## Project Snapshot
 
-Transight AI is a Route 72 MVP for Bristol bus prediction. The live app is:
+Transight AI is a Phase 2 MVP for Bristol bus prediction across Route 72 and the A1 Airport Flyer. The live app is:
 
 - `client/`: React 19 + Vite 7 + Tailwind v4 + Leaflet
 - `server/`: Flask API + Fusion Engine background thread + SQLAlchemy
 - PostgreSQL for route, stop, and bus-log data
 - Live inputs from BODS, TomTom, and YOLOv8, with optional GTFS timetable enrichment
+- Route-specific XGBoost ETA models for `72` and `A1`, with formula fallback retained for resilience
 
 The current shippable architecture is the existing Flask + React + PostgreSQL stack. Larger platform changes are deferred.
 
@@ -37,8 +38,9 @@ Optional data/model steps:
 ```bash
 cd server
 python gtfs_loader.py ../itm_south_west_gtfs.zip
-python generate_synthetic_data.py
-python train_xgboost.py
+python generate_synthetic_data.py --route 72
+python train_xgboost.py --route 72
+python train_xgboost.py --route A1
 ```
 
 ## High-Signal Files
@@ -55,7 +57,7 @@ python train_xgboost.py
 
 - Prefer the smallest targeted change and verify it before moving on.
 - Do not run `python seed.py` or `python server/seed.py` unless the user explicitly approves a destructive reset.
-- `server/app.py` does not auto-load `.env`; export variables in the shell when needed.
+- `server/app.py` auto-loads the repo-root `.env`; shell variables still override it when needed.
 - Keep graceful fallbacks intact when API keys or live feeds are unavailable.
 - Preserve Tailwind v4 patterns in the frontend; there is no `tailwind.config.js`.
 - Use the repo-specific rules in `.claude/rules/` for file-targeted constraints.
@@ -85,14 +87,14 @@ python train_xgboost.py
 
 **Transight AI**
 
-A real-time Bristol bus prediction platform that shows live bus positions, arrival times, and delay status for Bristol bus routes. Currently tracks Route 72 (Temple Meads to UWE Frenchay). Expanding to multi-route support starting with the A1 Airport Flyer (Bristol city centre to Bristol Airport).
+A real-time Bristol bus prediction platform that shows live bus positions, arrival times, and delay status for Bristol bus routes. It currently tracks Route 72 and the A1 Airport Flyer in both directions.
 
 **Core Value:** Accurate, real-time bus arrival predictions with delay indicators at every stop — proving the system scales beyond a single route.
 
 ### Constraints
 
 - **Tech stack**: Flask + React + PostgreSQL — no framework changes
-- **Data sources**: BODS, TomTom, GTFS — same integrations as Route 72
+- **Data sources**: BODS, TomTom, GTFS — shared across Route 72 and A1
 - **Tailwind**: v4 with `index.css` theme tokens — no `tailwind.config.js`
 - **Seed safety**: `seed.py` drops all tables — never run without explicit approval
 - **API keys**: Graceful fallback when BODS/TomTom keys unavailable
@@ -133,7 +135,7 @@ A real-time Bristol bus prediction platform that shows live bus positions, arriv
 - opencv-python-headless 4.9.0.80 - Computer vision (video frame processing)
 - xgboost 3.1.3 - Gradient boosting for ETA prediction model
 - scikit-learn 1.8.0 - Machine learning utilities
-- joblib - Model serialization for xgboost_eta_model.joblib
+- joblib - Model serialization for route-specific ETA model artifacts
 - globals 16.5.0 - Global variable definitions for ESLint
 - @types/react 19.2.7 - TypeScript type definitions for React
 - @types/react-dom 19.2.3 - TypeScript type definitions for ReactDOM
@@ -169,7 +171,12 @@ A real-time Bristol bus prediction platform that shows live bus positions, arriv
 - Loaded via: `server/gtfs_loader.py`
 - Parsed by: `server/gtfs_parser.py`
 - YOLOv8 nano: `server/yolov8n.pt` - Person detection for passenger counting
-- XGBoost: `server/xgboost_eta_model.joblib` - ETA prediction model trained via `server/train_xgboost.py`
+- XGBoost:
+  - `server/xgboost_eta_model_72.joblib`
+  - `server/xgboost_eta_model_a1.joblib`
+  - `server/xgboost_eta_metrics_72.json`
+  - `server/xgboost_eta_metrics_a1.json`
+  - `server/xgboost_eta_model.joblib` and `server/xgboost_eta_metrics.json` remain as the legacy Route 72 compatibility artifacts
 - Simulated camera feed: `bus_queue.mp4` (configurable via `VIDEO_PATH`)
 - Processed by YOLOv8 for passenger detection every Fusion Engine cycle
 ## API Endpoints
@@ -301,10 +308,10 @@ A real-time Bristol bus prediction platform that shows live bus positions, arriv
 - Contains: XML parsing, CSV reading, GTFS trip selection, live/scheduled trip matching
 - Depends on: Requests library, zipfile, CSV readers
 - Used by: Fusion Engine, schedule builders
-- Purpose: Predict ETA using trained XGBoost model, calculate distances with fallback chain
+- Purpose: Predict ETA using route-specific trained XGBoost models, calculate distances with fallback chain
 - Location: `server/app.py` (XGBoost functions at line 277, routing at line 530)
 - Contains: ETA feature engineering, model loading, haversine fallback, OSRM routing, TomTom routing
-- Depends on: joblib, requests, trained `xgboost_eta_model.joblib`
+- Depends on: joblib, requests, trained `xgboost_eta_model_<route>.joblib` artifacts
 - Used by: Fusion Engine (every cycle), schedule delay calculation
 - Purpose: Detect passenger count at major stops from video feed
 - Location: `server/app.py` (crowd functions at line 760)
@@ -317,7 +324,7 @@ A real-time Bristol bus prediction platform that shows live bus positions, arriv
 - Historical data: All BusLog entries, queried with time window filter (default 6 hours)
 - Crowd history: In-memory `_crowd_history` dict, averaged over 3 readings to smooth YOLO noise
 - GTFS schedule: Cached in memory via `get_cached_gtfs_data()` (line 409)
-- ETA model: Loaded once on startup, memoized in `_eta_model` global (line 277)
+- ETA models: Loaded per route and memoized in the `_eta_models` registry
 ## Key Abstractions
 - Purpose: Define a bus route (e.g., "Route 72 Outbound Temple Meads→Frenchay")
 - Examples: `server/models.py` line 12, Flask query at `server/app.py` line 1246
@@ -337,7 +344,7 @@ A real-time Bristol bus prediction platform that shows live bus positions, arriv
 ## Entry Points
 - Location: `server/app.py` line 1732 (main block)
 - Triggers: `python app.py`
-- Responsibilities: Initialize Flask app, create database tables, load ETA model, start Fusion Engine thread, listen on port 5000
+- Responsibilities: Initialize Flask app, create database tables, preload route-specific ETA models, start Fusion Engine thread, listen on port 5000
 - Location: `server/app.py` line 1235 (function definition); started at line 1754
 - Triggers: Spawned at app startup as daemon thread
 - Responsibilities: Poll all routes every 10s, fetch BODS vehicles, compute ETA, write logs
@@ -349,7 +356,7 @@ A real-time Bristol bus prediction platform that shows live bus positions, arriv
 - Responsibilities: Create PostgreSQL database, initialize schema
 ## Error Handling
 - **TomTom API failures:** Disable service on auth error (401/403), log once, fall back to OSRM (line 666-678)
-- **XGBoost model missing:** Use formula-based ETA instead (line 284-286, 319-322)
+- **XGBoost model missing for a route:** Use formula-based ETA for that route only
 - **GTFS file missing:** Use DB-only stops if zip unavailable (line 405-407, 444-445)
 - **BODS API key missing:** Return empty vehicle list, skip route (line 696-698)
 - **YOLOv8 inference failure:** Caught in `count_passengers()`, return 0 crowd

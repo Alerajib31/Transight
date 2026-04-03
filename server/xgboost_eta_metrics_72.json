@@ -27,5 +27,5 @@
     "total_stops": 0.012571,
     "progress_ratio": 0.313166
   },
-  "model_path": "C:\\Users\\rajib\\Downloads\\Transight2\\server\\xgboost_eta_model.joblib"
+  "model_path": "C:\\Users\\rajib\\Downloads\\Transight2\\server\\xgboost_eta_model_72.joblib"
 }
