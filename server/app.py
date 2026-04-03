@@ -14,6 +14,7 @@ The Fusion Engine runs as a background daemon thread.  Every 10 seconds it:
 import os
 import time
 import math
+import re
 import threading
 import logging
 import atexit
@@ -66,6 +67,37 @@ BODS_OPERATOR_ALLOWLIST = tuple(dict.fromkeys(_operator_allowlist)) if _operator
 
 # Bristol operator code (First Bristol = FBRI)
 BODS_OPERATOR = BODS_OPERATOR_ALLOWLIST[0]
+
+ROUTE_DIRECTION_TERMINAL_ALIASES = {
+    "a1": {
+        "outbound": (
+            "bristol airport",
+            "public transport interchange",
+        ),
+        "inbound": (
+            "bristol bus station",
+            "bus station",
+            "marlborough",
+            "city centre",
+        ),
+    },
+    "72": {
+        "outbound": (
+            "frenchay",
+            "frenchay campus",
+            "uwe frenchay",
+        ),
+        "inbound": (
+            "temple meads",
+            "temple meads stn",
+            "temple meads station",
+        ),
+    },
+}
+GENERIC_DIRECTION_ALIASES = {
+    "outbound": ("outbound",),
+    "inbound": ("inbound",),
+}
 
 # Major stops where crowd detection is applied (others assume 0 crowd)
 # Format: (stop_name, lat, lng)
@@ -253,6 +285,71 @@ def resolve_vehicle_operator(vehicle_data):
         return vehicle_id.split("-", 1)[0].strip() or "unknown"
 
     return "unknown"
+
+
+def normalize_bods_text(value):
+    """Normalize BODS free-text fields for resilient alias matching."""
+    if not value:
+        return ""
+
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value).lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def find_matching_alias(text, aliases):
+    """Return the first alias that appears in text after normalization."""
+    normalized_text = normalize_bods_text(text)
+    for alias in sorted({normalize_bods_text(alias) for alias in aliases if alias}, key=len, reverse=True):
+        if alias and alias in normalized_text:
+            return alias
+    return None
+
+
+def get_route_terminal_aliases(route):
+    """Return selected and opposite terminal aliases for a route direction."""
+    route_name = (getattr(route, "route_name", "") or "").strip().lower()
+    direction = (getattr(route, "direction", "") or "").strip().lower()
+    opposite_direction = "inbound" if direction == "outbound" else "outbound"
+    alias_config = ROUTE_DIRECTION_TERMINAL_ALIASES.get(route_name, {})
+
+    selected_aliases = set(alias_config.get(direction, ()))
+    opposite_aliases = set(alias_config.get(opposite_direction, ()))
+
+    if getattr(route, "destination_name", None):
+        selected_aliases.add(route.destination_name)
+    if getattr(route, "origin_name", None):
+        opposite_aliases.add(route.origin_name)
+
+    return selected_aliases, opposite_aliases
+
+
+def confirm_vehicle_direction(route, vehicle_data):
+    """Return whether a vehicle is positively confirmed for the route direction."""
+    route_direction = (getattr(route, "direction", "") or "").strip().lower()
+    opposite_direction = "inbound" if route_direction == "outbound" else "outbound"
+    destination_text = vehicle_data.get("destination")
+    direction_text = vehicle_data.get("direction")
+    selected_aliases, opposite_aliases = get_route_terminal_aliases(route)
+
+    destination_match = find_matching_alias(destination_text, selected_aliases)
+    if destination_match:
+        return True, "destination_match", destination_match
+
+    destination_conflict = find_matching_alias(destination_text, opposite_aliases)
+    if destination_conflict:
+        return False, "direction_conflict", destination_conflict
+
+    direction_aliases = GENERIC_DIRECTION_ALIASES.get(route_direction, ())
+    direction_match = find_matching_alias(direction_text, direction_aliases)
+    if direction_match:
+        return True, "direction_match", direction_match
+
+    opposite_direction_aliases = GENERIC_DIRECTION_ALIASES.get(opposite_direction, ())
+    direction_conflict = find_matching_alias(direction_text, opposite_direction_aliases)
+    if direction_conflict:
+        return False, "direction_conflict", direction_conflict
+
+    return False, "direction_ambiguous", None
 
 
 def get_current_stop_context(route_stops, current_lat, current_lng):
@@ -783,8 +880,42 @@ def fetch_all_buses_for_route(route, all_vehicles: list | None = None):
         logger.warning(f"[BODS] No vehicles matched operators {', '.join(BODS_OPERATOR_ALLOWLIST)}")
         return []
 
+    direction_confirmed = []
+    for vehicle in vehicles:
+        vehicle_id = vehicle.get("vehicle_id") or "unknown"
+        is_match, reason, detail = confirm_vehicle_direction(route, vehicle)
+        if is_match:
+            logger.info(
+                "[BODS] Direction accept for route %s (%s) vehicle %s via %s: detail=%s destination=%s direction=%s",
+                route_name,
+                direction,
+                vehicle_id,
+                reason,
+                detail or "n/a",
+                vehicle.get("destination"),
+                vehicle.get("direction"),
+            )
+            direction_confirmed.append(vehicle)
+        else:
+            logger.info(
+                "[BODS] Direction reject for route %s (%s) vehicle %s via %s: detail=%s destination=%s direction=%s",
+                route_name,
+                direction,
+                vehicle_id,
+                reason,
+                detail or "n/a",
+                vehicle.get("destination"),
+                vehicle.get("direction"),
+            )
+
+    if not direction_confirmed:
+        logger.warning(
+            f"[BODS] No direction-confirmed vehicles found for route {route_name} ({direction})"
+        )
+        return []
+
     vehicles = [
-        v for v in vehicles
+        v for v in direction_confirmed
         if is_vehicle_live_for_route(v, route)
     ]
 
@@ -792,30 +923,11 @@ def fetch_all_buses_for_route(route, all_vehicles: list | None = None):
         logger.warning(f"[BODS] No recent Bristol-route vehicles found for route {route_name}")
         return []
 
-    # Filter by direction
-    direction_lower = direction.lower()
-    matching_vehicles = []
-
+    logger.info(f"[BODS] Returning {len(vehicles)} matching vehicle(s)")
     for v in vehicles:
-        vehicle_direction = (v.get('direction') or '').lower()
-        destination = (v.get('destination') or '').lower()
-
-        # Check direction match - either by direction field or destination
-        if (direction_lower in vehicle_direction or
-                vehicle_direction == direction_lower or
-                direction_lower in destination):
-            matching_vehicles.append(v)
-
-    # If no direction match, use all vehicles
-    if not matching_vehicles:
-        matching_vehicles = vehicles
-        logger.warning(f"[BODS] No direction match for {direction}, using all {len(vehicles)} vehicles")
-
-    logger.info(f"[BODS] Returning {len(matching_vehicles)} matching vehicle(s)")
-    for v in matching_vehicles:
         logger.info(f"  - Vehicle {v.get('vehicle_id')}: ({v['lat']:.5f}, {v['lng']:.5f}) to {v.get('destination')}")
 
-    return matching_vehicles
+    return vehicles
 
 
 # ---------------------------------------------------------------------------
