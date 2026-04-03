@@ -95,7 +95,17 @@ def load_gtfs(zip_path: str, route_filter=None, dry_run: bool = False) -> None:
         print(f"{mode}[4/4] Linking stops to routes...")
 
         for route in routes:
-            stops = get_stops_for_route(gtfs_data, route.route_name, route.direction)
+            stops = get_stops_for_route(
+                gtfs_data,
+                route.route_name,
+                route.direction,
+                origin_name=route.origin_name,
+                destination_name=route.destination_name,
+                origin_lat=route.origin_lat,
+                origin_lng=route.origin_lng,
+                destination_lat=route.dest_lat,
+                destination_lng=route.dest_lng,
+            )
 
             if not stops:
                 print(f"  WARNING: No stops found for {route.route_name} ({route.direction})")
@@ -104,6 +114,9 @@ def load_gtfs(zip_path: str, route_filter=None, dry_run: bool = False) -> None:
             print(f"  {mode}{route.route_name} ({route.direction}): {len(stops)} stops")
 
             if not dry_run:
+                route.total_stops = len(stops)
+                route.route_path = [[stop["lat"], stop["lng"]] for stop in stops]
+
                 for stop_data in stops:
                     # Upsert the Stop record
                     existing = Stop.query.filter_by(stop_id=stop_data['stop_id']).first()

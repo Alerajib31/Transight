@@ -123,13 +123,24 @@ def fetch_bods_vehicles(api_key, line_ref=None, operator_ref=None, bounding_box=
         logger.info(f"[BODS] Fetching vehicles with params: {params}")
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        
+
         # Parse XML response
         vehicles = parse_siri_vm(resp.content)
         logger.info(f"[BODS] Found {len(vehicles)} vehicle(s)")
-        
+
         return vehicles
-        
+
+    except requests.exceptions.HTTPError as e:
+        response = e.response
+        status = response.status_code if response is not None else "unknown"
+        body_preview = ""
+        if response is not None:
+            body_preview = " ".join(response.text.split())[:180]
+        logger.error(
+            f"[BODS] API request failed ({status}): "
+            f"{body_preview or e}"
+        )
+        return []
     except requests.exceptions.RequestException as e:
         logger.error(f"[BODS] API request failed: {e}")
         return []

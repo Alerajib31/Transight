@@ -420,6 +420,10 @@ def get_gtfs_schedule_trip(route, current_time=None, current_stop_seq=None, mode
                 current_stop_seq,
                 origin_name=route.origin_name,
                 destination_name=route.destination_name,
+                origin_lat=route.origin_lat,
+                origin_lng=route.origin_lng,
+                destination_lat=route.dest_lat,
+                destination_lng=route.dest_lng,
             )
 
         return select_next_route_trip(
@@ -429,6 +433,10 @@ def get_gtfs_schedule_trip(route, current_time=None, current_stop_seq=None, mode
             local_time,
             origin_name=route.origin_name,
             destination_name=route.destination_name,
+            origin_lat=route.origin_lat,
+            origin_lng=route.origin_lng,
+            destination_lat=route.dest_lat,
+            destination_lng=route.dest_lng,
         )
     except Exception as exc:
         logger.error(f"[GTFS] Trip selection failed: {exc}")
@@ -795,9 +803,27 @@ _bods_bulk_cache: dict = {"vehicles": None, "cycle_id": -1}
 _bods_cycle_counter: int = 0
 
 
+def dedupe_bods_vehicles(vehicles: list[dict]) -> list[dict]:
+    """Keep the newest unique vehicle record for each vehicle_id."""
+    deduped = {}
+
+    for vehicle in vehicles:
+        vehicle_id = (vehicle.get("vehicle_id") or "").strip()
+        key = vehicle_id or (
+            (vehicle.get("operator") or "").strip(),
+            (vehicle.get("line") or "").strip(),
+            vehicle.get("lat"),
+            vehicle.get("lng"),
+            vehicle.get("recorded_at"),
+        )
+        deduped[key] = vehicle
+
+    return list(deduped.values())
+
+
 def fetch_bods_vehicles_bulk(cycle_id: int) -> list:
     """
-    Fetch ALL vehicles for configured operators in ONE BODS call per Fusion cycle.
+    Fetch vehicles once per cycle for the configured operator allowlist.
     Result is cached by cycle_id so each route in the same cycle reuses it.
     """
     global _bods_bulk_cache
@@ -815,8 +841,35 @@ def fetch_bods_vehicles_bulk(cycle_id: int) -> list:
         return []
 
     try:
-        vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY)  # no line_ref = all operators
-        logger.info(f"[BODS] Bulk fetch cycle {cycle_id}: {len(vehicles)} raw vehicles")
+        vehicles = []
+
+        if BODS_OPERATOR_ALLOWLIST:
+            logger.info(
+                f"[BODS] Bulk fetch cycle {cycle_id}: batching by operator "
+                f"({', '.join(BODS_OPERATOR_ALLOWLIST)})"
+            )
+            for operator_ref in BODS_OPERATOR_ALLOWLIST:
+                operator_vehicles = fetch_bods_vehicles(
+                    api_key=BODS_API_KEY,
+                    operator_ref=operator_ref,
+                )
+                logger.info(
+                    f"[BODS] Operator {operator_ref}: "
+                    f"{len(operator_vehicles)} raw vehicles"
+                )
+                vehicles.extend(operator_vehicles)
+        else:
+            vehicles = fetch_bods_vehicles(api_key=BODS_API_KEY)
+            logger.info(
+                f"[BODS] Bulk fetch cycle {cycle_id}: "
+                f"{len(vehicles)} raw vehicles"
+            )
+
+        vehicles = dedupe_bods_vehicles(vehicles)
+        logger.info(
+            f"[BODS] Bulk fetch cycle {cycle_id}: "
+            f"{len(vehicles)} deduped vehicles"
+        )
         _bods_bulk_cache = {"vehicles": vehicles, "cycle_id": cycle_id}
         return vehicles
     except Exception as exc:

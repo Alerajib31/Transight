@@ -9,6 +9,7 @@ import io
 import os
 import zipfile
 import csv
+import math
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from functools import lru_cache
@@ -199,6 +200,35 @@ def names_match(expected, actual):
     return expected_norm in actual_norm or actual_norm in expected_norm
 
 
+def haversine_km(lat1, lng1, lat2, lng2):
+    """Return the great-circle distance between two points in kilometres."""
+    radius_km = 6371.0
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lng = math.radians(lng2 - lng1)
+
+    a = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lng / 2) ** 2
+    )
+    return 2 * radius_km * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def endpoint_matches(expected_name=None, actual_name=None,
+                     expected_lat=None, expected_lng=None,
+                     actual_lat=None, actual_lng=None,
+                     max_distance_km=1.5):
+    """Match route endpoints by name first, then by coordinate proximity."""
+    if expected_name and actual_name and names_match(expected_name, actual_name):
+        return True
+
+    if None not in (expected_lat, expected_lng, actual_lat, actual_lng):
+        return haversine_km(expected_lat, expected_lng, actual_lat, actual_lng) <= max_distance_km
+
+    return not any(value is not None for value in (expected_name, expected_lat, expected_lng))
+
+
 def is_service_active(gtfs_data, service_id, target_date):
     """Check whether a GTFS service_id is active on a given date."""
     date_key = target_date.strftime("%Y%m%d")
@@ -268,9 +298,16 @@ def build_trip_payload(trip, trip_stop_times, stop_lookup, service_date):
 
 
 def get_trip_candidates(gtfs_data, route_name, direction, service_date,
-                        origin_name=None, destination_name=None, agency_id=None):
+                        origin_name=None, destination_name=None,
+                        origin_lat=None, origin_lng=None,
+                        destination_lat=None, destination_lng=None,
+                        agency_id=None):
     """Return active trip candidates for a route/direction on a specific date."""
-    direction_id = '0' if direction == 'outbound' else '1'
+    preferred_direction_id = '0' if direction == 'outbound' else '1'
+    direction_ids = [preferred_direction_id]
+    if origin_name or destination_name:
+        alternate_direction_id = '1' if preferred_direction_id == '0' else '0'
+        direction_ids.append(alternate_direction_id)
     stop_lookup = gtfs_data.get("stop_lookup", {})
     stop_times_by_trip = gtfs_data.get("stop_times_by_trip", {})
 
@@ -296,10 +333,16 @@ def get_trip_candidates(gtfs_data, route_name, direction, service_date,
     route_ids = {route["route_id"] for route in matching_routes}
     candidate_trips = []
     route_direction_index = gtfs_data.get("trips_by_route_direction", {})
+    seen_trip_ids = set()
     for route_id in route_ids:
-        for trip in route_direction_index.get((route_id, direction_id), []):
-            if is_service_active(gtfs_data, trip["service_id"], service_date):
-                candidate_trips.append(trip)
+        for direction_id in direction_ids:
+            for trip in route_direction_index.get((route_id, direction_id), []):
+                trip_id = trip["trip_id"]
+                if trip_id in seen_trip_ids:
+                    continue
+                if is_service_active(gtfs_data, trip["service_id"], service_date):
+                    candidate_trips.append(trip)
+                    seen_trip_ids.add(trip_id)
 
     payloads = []
     fallback_payloads = []
@@ -316,16 +359,37 @@ def get_trip_candidates(gtfs_data, route_name, direction, service_date,
         fallback_payloads.append(payload)
         first_stop_name = payload["stops"][0]["stop_name"]
         last_stop_name = payload["stops"][-1]["stop_name"]
-        if origin_name and not names_match(origin_name, first_stop_name):
+        first_stop = payload["stops"][0]
+        last_stop = payload["stops"][-1]
+
+        if not endpoint_matches(
+            expected_name=origin_name,
+            actual_name=first_stop_name,
+            expected_lat=origin_lat,
+            expected_lng=origin_lng,
+            actual_lat=first_stop["lat"],
+            actual_lng=first_stop["lng"],
+        ):
             continue
-        if destination_name and not names_match(destination_name, last_stop_name):
+        if not endpoint_matches(
+            expected_name=destination_name,
+            actual_name=last_stop_name,
+            expected_lat=destination_lat,
+            expected_lng=destination_lng,
+            actual_lat=last_stop["lat"],
+            actual_lng=last_stop["lng"],
+        ):
             continue
         payloads.append(payload)
 
     return payloads or fallback_payloads
 
 
-def select_next_route_trip(gtfs_data, route_name, direction, reference_time, origin_name=None, destination_name=None, lookahead_days=7):
+def select_next_route_trip(gtfs_data, route_name, direction, reference_time,
+                           origin_name=None, destination_name=None,
+                           origin_lat=None, origin_lng=None,
+                           destination_lat=None, destination_lng=None,
+                           lookahead_days=7):
     """Select the next valid scheduled trip for the given route and local time."""
     local_reference = reference_time.replace(tzinfo=None) if reference_time.tzinfo else reference_time
 
@@ -338,6 +402,10 @@ def select_next_route_trip(gtfs_data, route_name, direction, reference_time, ori
             service_date,
             origin_name=origin_name,
             destination_name=destination_name,
+            origin_lat=origin_lat,
+            origin_lng=origin_lng,
+            destination_lat=destination_lat,
+            destination_lng=destination_lng,
         )
         if not candidates:
             continue
@@ -356,7 +424,10 @@ def select_next_route_trip(gtfs_data, route_name, direction, reference_time, ori
     return None
 
 
-def select_live_route_trip(gtfs_data, route_name, direction, reference_time, current_stop_sequence, origin_name=None, destination_name=None):
+def select_live_route_trip(gtfs_data, route_name, direction, reference_time,
+                           current_stop_sequence, origin_name=None, destination_name=None,
+                           origin_lat=None, origin_lng=None,
+                           destination_lat=None, destination_lng=None):
     """Select the active trip whose current-stop schedule best matches the given time."""
     local_reference = reference_time.replace(tzinfo=None) if reference_time.tzinfo else reference_time
     service_date = local_reference.date()
@@ -367,6 +438,10 @@ def select_live_route_trip(gtfs_data, route_name, direction, reference_time, cur
         service_date,
         origin_name=origin_name,
         destination_name=destination_name,
+        origin_lat=origin_lat,
+        origin_lng=origin_lng,
+        destination_lat=destination_lat,
+        destination_lng=destination_lng,
     )
     if not candidates:
         return None
@@ -391,7 +466,10 @@ def select_live_route_trip(gtfs_data, route_name, direction, reference_time, cur
     return best_trip
 
 
-def get_stops_for_route(gtfs_data, route_short_name, direction):
+def get_stops_for_route(gtfs_data, route_short_name, direction,
+                        origin_name=None, destination_name=None,
+                        origin_lat=None, origin_lng=None,
+                        destination_lat=None, destination_lng=None):
     """
     Get ordered list of stops for a specific route and direction.
 
@@ -404,7 +482,18 @@ def get_stops_for_route(gtfs_data, route_short_name, direction):
         List of stops in order with {stop_id, stop_name, lat, lng, sequence}
     """
     service_date = date.today()
-    candidates = get_trip_candidates(gtfs_data, route_short_name, direction, service_date)
+    candidates = get_trip_candidates(
+        gtfs_data,
+        route_short_name,
+        direction,
+        service_date,
+        origin_name=origin_name,
+        destination_name=destination_name,
+        origin_lat=origin_lat,
+        origin_lng=origin_lng,
+        destination_lat=destination_lat,
+        destination_lng=destination_lng,
+    )
     if not candidates:
         return []
 
