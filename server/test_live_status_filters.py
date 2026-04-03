@@ -154,6 +154,47 @@ class LiveStatusFilterTests(unittest.TestCase):
 
         self.assertTrue(visible)
 
+    def test_bus_at_final_stop_snaps_eta_to_terminal_arrival(self):
+        route = make_route()
+        route.route_stops = [
+            make_stop(0, 51.0000, -2.0000),
+            make_stop(20, 51.1000, -2.1000),
+        ]
+        trip = {
+            "service_date": date(2026, 4, 3),
+            "service_time": "05:00:00",
+            "stops": [
+                {
+                    "sequence": 0,
+                    "lat": 51.0000,
+                    "lng": -2.0000,
+                    "arrival_time": "05:00:00",
+                    "departure_time": "05:00:00",
+                },
+                {
+                    "sequence": 20,
+                    "lat": 51.1000,
+                    "lng": -2.1000,
+                    "arrival_time": "05:22:00",
+                    "departure_time": "05:22:00",
+                },
+            ],
+        }
+
+        with patch.object(app_module, "get_gtfs_schedule_trip", return_value=trip):
+            eta = app_module.estimate_schedule_eta_from_position(
+                route,
+                51.1000,
+                -2.1000,
+                current_time=datetime(2026, 4, 3, 5, 15, tzinfo=app_module.UK_TZ),
+                current_stop_seq=20,
+            )
+
+        self.assertIsNotNone(eta)
+        self.assertEqual(eta["eta"], 0.5)
+        self.assertEqual(eta["current_stop_scheduled"], "05:22:00")
+        self.assertEqual(eta["final_stop_scheduled"], "05:22:00")
+
     @patch.object(app_module, "calculate_stop_predictions", return_value=[])
     @patch.object(app_module, "get_current_service_time", return_value=("05:00", 2.0, None))
     @patch.object(app_module, "resolve_live_eta", side_effect=lambda route, log, current_stop_seq, remaining_stops: (log.predicted_eta, "test"))

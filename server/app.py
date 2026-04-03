@@ -64,6 +64,7 @@ ROUTE_PROXIMITY_THRESHOLD_KM = float(os.getenv("ROUTE_PROXIMITY_THRESHOLD_KM", "
 LIVE_TRIP_MAX_EARLY_MINUTES = float(os.getenv("LIVE_TRIP_MAX_EARLY_MINUTES", "5"))
 LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25"))
 ORIGIN_STAGING_RADIUS_KM = float(os.getenv("ORIGIN_STAGING_RADIUS_KM", "0.15"))
+TERMINAL_ARRIVAL_RADIUS_KM = float(os.getenv("TERMINAL_ARRIVAL_RADIUS_KM", "0.15"))
 ORIGIN_EARLY_DISPLAY_MINUTES = float(os.getenv("ORIGIN_EARLY_DISPLAY_MINUTES", "4"))
 UK_TZ = ZoneInfo("Europe/London")
 
@@ -499,6 +500,17 @@ def predict_eta_xgboost(route, passenger_count, traffic_delay_seconds, current_s
         return None
 
 
+def find_trip_stop_by_sequence(trip_stops, stop_sequence):
+    """Return the GTFS trip stop matching a route stop sequence."""
+    if trip_stops is None or stop_sequence is None:
+        return None
+
+    return next(
+        (stop for stop in trip_stops if stop.get("sequence") == stop_sequence),
+        None,
+    )
+
+
 def estimate_schedule_eta_from_position(route, current_lat, current_lng, current_time=None, current_stop_seq=None):
     """Estimate remaining ETA from the matched GTFS trip and current lateness."""
     if route is None or current_lat is None or current_lng is None:
@@ -525,28 +537,44 @@ def estimate_schedule_eta_from_position(route, current_lat, current_lng, current
     if not trip_stops:
         return None
 
-    current_trip_stop = next(
-        (stop for stop in trip_stops if stop.get("sequence") == current_stop_seq),
-        None,
-    )
+    current_trip_stop = find_trip_stop_by_sequence(trip_stops, current_stop_seq)
     if current_trip_stop is None and 0 <= current_stop_seq < len(trip_stops):
         current_trip_stop = trip_stops[current_stop_seq]
     if current_trip_stop is None:
         return None
 
+    final_stop = trip_stops[-1]
     current_sched_dt = build_gtfs_datetime(
         selected_trip["service_date"],
         current_trip_stop["arrival_time"],
     )
     final_sched_dt = build_gtfs_datetime(
         selected_trip["service_date"],
-        trip_stops[-1]["arrival_time"],
+        final_stop["arrival_time"],
     )
     if current_sched_dt is None or final_sched_dt is None:
         return None
 
     current_sched_dt = current_sched_dt.replace(tzinfo=UK_TZ)
     final_sched_dt = final_sched_dt.replace(tzinfo=UK_TZ)
+
+    terminal_distance_km = haversine(
+        current_lat,
+        current_lng,
+        final_stop["lat"],
+        final_stop["lng"],
+    )
+    if terminal_distance_km <= TERMINAL_ARRIVAL_RADIUS_KM:
+        delay_min = max(0.0, (local_time - final_sched_dt).total_seconds() / 60.0)
+        return {
+            "eta": 0.5,
+            "delay_minutes": round(delay_min, 1),
+            "service_time": format_gtfs_time(selected_trip.get("service_time")),
+            "current_stop_sequence": final_stop["sequence"],
+            "current_stop_scheduled": final_stop["arrival_time"],
+            "final_stop_scheduled": final_stop["arrival_time"],
+        }
+
     delay_min = max(0.0, (local_time - current_sched_dt).total_seconds() / 60.0)
     eta_min = max(0.5, ((final_sched_dt - local_time).total_seconds() / 60.0) + delay_min)
 
@@ -1556,8 +1584,11 @@ def get_current_service_time(route_id, current_lat, current_lng, current_time=No
         if selected_trip:
             service_time_str = format_gtfs_time(selected_trip.get("service_time"))
             trip_stops = selected_trip.get("stops", [])
-            if 0 <= current_stop_seq < len(trip_stops):
-                current_stop_scheduled = trip_stops[current_stop_seq]["arrival_time"]
+            current_trip_stop = find_trip_stop_by_sequence(trip_stops, current_stop_seq)
+            if current_trip_stop is None and 0 <= current_stop_seq < len(trip_stops):
+                current_trip_stop = trip_stops[current_stop_seq]
+            if current_trip_stop is not None:
+                current_stop_scheduled = current_trip_stop["arrival_time"]
                 scheduled_dt = build_gtfs_datetime(
                     selected_trip["service_date"],
                     current_stop_scheduled,

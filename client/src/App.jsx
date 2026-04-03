@@ -89,6 +89,10 @@ const stopIcon = new L.DivIcon({
 const API_BASE = "/api";
 const POLL_INTERVAL = 10_000; // 10 seconds
 const HISTORY_POLL_INTERVAL = 30_000;
+const A1_BRISTOL_TERMINALS = new Set([
+  "Bristol Bus Station",
+  "Bristol City Centre (Marlborough St)",
+]);
 
 function getBusKey(bus, index = 0) {
   return `${bus.operator || "unknown"}:${bus.vehicle_id || `bus-${index}`}`;
@@ -98,6 +102,13 @@ function getBusLabel(bus, index = 0) {
   const operator = bus.operator && bus.operator !== "unknown" ? bus.operator : "Unknown operator";
   const vehicle = bus.vehicle_id && bus.vehicle_id !== "unknown" ? bus.vehicle_id : `Bus ${index + 1}`;
   return `${operator} • ${vehicle}`;
+}
+
+function getDisplayTerminalName(routeName, terminalName) {
+  if (routeName === "A1" && A1_BRISTOL_TERMINALS.has(terminalName)) {
+    return "Bristol";
+  }
+  return terminalName;
 }
 
 function getStoredTheme() {
@@ -337,8 +348,8 @@ export default function App() {
 
 
   /* ── Derived values ────────────────────────────────────────────── */
-  const originName = route?.origin_name ?? "—";
-  const destName = route?.destination_name ?? "—";
+  const displayOriginName = route ? getDisplayTerminalName(route.route_name, route.origin_name) : "--";
+  const displayDestName = route ? getDisplayTerminalName(route.route_name, route.destination_name) : "--";
   const selectedBusIndex = buses.findIndex((bus, index) => getBusKey(bus, index) === selectedBusKey);
   const selectedBus =
     (selectedBusIndex >= 0 ? buses[selectedBusIndex] : null) ||
@@ -434,7 +445,7 @@ export default function App() {
           >
             {routes.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.route_name} — {r.direction} → {r.destination_name}
+                {r.route_name} — {r.direction} → {getDisplayTerminalName(r.route_name, r.destination_name)}
               </option>
             ))}
           </select>
@@ -461,12 +472,12 @@ export default function App() {
             </p>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-6 h-6 rounded-full bg-success/20 text-success flex items-center justify-center text-xs font-bold">A</span>
-              <span className="font-medium">{originName}</span>
+              <span className="font-medium">{displayOriginName}</span>
             </div>
             <div className="ml-3 w-0.5 h-6 bg-border"></div>
             <div className="flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-danger/20 text-danger flex items-center justify-center text-xs font-bold">B</span>
-              <span className="font-medium">{destName}</span>
+              <span className="font-medium">{displayDestName}</span>
             </div>
           </div>
 
@@ -476,7 +487,7 @@ export default function App() {
               {buses.length > 1 ? `${buses.length} Buses En Route` : 'Bus Arrives At'}
             </p>
             <p className="text-lg font-semibold text-text-primary mb-2">
-              {destName}
+              {displayDestName}
             </p>
             {activeBus && (
               <p className="text-xs text-text-secondary mb-3">
@@ -623,7 +634,7 @@ export default function App() {
             {originPos && (
               <Marker position={originPos} icon={originIcon}>
                 <Popup>
-                  <strong>Departure:</strong> {originName}
+                  <strong>Departure:</strong> {displayOriginName}
                 </Popup>
               </Marker>
             )}
@@ -632,7 +643,7 @@ export default function App() {
             {destPos && (
               <Marker position={destPos} icon={destIcon}>
                 <Popup>
-                  <strong>Destination:</strong> {destName}
+                  <strong>Destination:</strong> {displayDestName}
                   <br />
                   ETA: {eta} mins
                 </Popup>
@@ -653,7 +664,7 @@ export default function App() {
                   <br />
                   {bus.position[0].toFixed(5)}, {bus.position[1].toFixed(5)}
                   <br />
-                  <strong>To:</strong> {destName}
+                  <strong>To:</strong> {displayDestName}
                   <br />
                   <strong>ETA:</strong> {bus.eta ?? '--'} mins
                   <br />

@@ -7,6 +7,11 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 
 db = SQLAlchemy()
+A1_BRISTOL_DISPLAY_NAME = "Bristol"
+A1_CITY_TERMINAL_NAMES = {
+    "Bristol Bus Station",
+    "Bristol City Centre (Marlborough St)",
+}
 
 
 class Route(db.Model):
@@ -37,14 +42,22 @@ class Route(db.Model):
     logs = db.relationship("BusLog", backref="route", lazy=True)
 
     def to_dict(self):
+        origin_name = self.origin_name
+        destination_name = self.destination_name
+        if self.route_name == "A1":
+            if origin_name in A1_CITY_TERMINAL_NAMES:
+                origin_name = A1_BRISTOL_DISPLAY_NAME
+            if destination_name in A1_CITY_TERMINAL_NAMES:
+                destination_name = A1_BRISTOL_DISPLAY_NAME
+
         return {
             "id": self.id,
             "route_name": self.route_name,
             "direction": self.direction,
-            "origin_name": self.origin_name,
+            "origin_name": origin_name,
             "origin_lat": self.origin_lat,
             "origin_lng": self.origin_lng,
-            "destination_name": self.destination_name,
+            "destination_name": destination_name,
             "dest_lat": self.dest_lat,
             "dest_lng": self.dest_lng,
             "route_path": self.route_path or [],
