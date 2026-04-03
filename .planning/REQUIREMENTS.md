@@ -12,12 +12,12 @@ Requirements for the A1 Airport Flyer multi-route update. Each maps to roadmap p
 - [x] **DATA-01**: A1 Airport Flyer route extracted from GTFS with agency filtering to avoid operator collisions
 - [ ] **DATA-02**: A1 route and stops seeded in database for both directions (Bristol → Airport, Airport → Bristol)
 - [x] **DATA-03**: GTFS loader safely adds new routes without wiping existing Route 72 data
-- [ ] **DATA-04**: BODS fetch refactored for multi-route efficiency (bulk or batched requests)
+- [x] **DATA-04**: BODS fetch refactored for multi-route efficiency (bulk or batched requests)
 
 ### Live Tracking
 
-- [ ] **LIVE-01**: Fusion Engine tracks A1 vehicles via BODS with correct operator/line filtering
-- [ ] **LIVE-02**: `is_near_major_stop()` refactored to be route-aware (not hardcoded to Route 72 stops)
+- [x] **LIVE-01**: Fusion Engine tracks A1 vehicles via BODS with correct operator/line filtering
+- [x] **LIVE-02**: `is_near_major_stop()` refactored to be route-aware (not hardcoded to Route 72 stops)
 - [ ] **LIVE-03**: Per-stop arrival time and delay indicator (on time / late / early) computed for all active routes
 
 ### Frontend
@@ -69,9 +69,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Pending |
 | DATA-03 | Phase 1 | Complete |
-| DATA-04 | Phase 1 | Pending |
-| LIVE-01 | Phase 1 | Pending |
-| LIVE-02 | Phase 1 | Pending |
+| DATA-04 | Phase 1 | Complete |
+| LIVE-01 | Phase 1 | Complete |
+| LIVE-02 | Phase 1 | Complete |
 | LIVE-03 | Phase 2 | Pending |
 | UI-01 | Phase 2 | Pending |
 | UI-02 | Phase 2 | Pending |
