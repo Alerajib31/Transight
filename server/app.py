@@ -490,6 +490,113 @@ def predict_eta_xgboost(route, passenger_count, traffic_delay_seconds, current_s
         return None
 
 
+def estimate_schedule_eta_from_position(route, current_lat, current_lng, current_time=None, current_stop_seq=None):
+    """Estimate remaining ETA from the matched GTFS trip and current lateness."""
+    if route is None or current_lat is None or current_lng is None:
+        return None
+
+    route_stops = sorted(route.route_stops, key=lambda rs: rs.sequence)
+    if not route_stops:
+        return None
+
+    local_time = to_uk_datetime(current_time)
+    if current_stop_seq is None:
+        current_stop_seq, _, _ = get_current_stop_context(route_stops, current_lat, current_lng)
+
+    selected_trip = get_gtfs_schedule_trip(
+        route,
+        current_time=local_time,
+        current_stop_seq=current_stop_seq,
+        mode="live",
+    )
+    if not selected_trip:
+        return None
+
+    trip_stops = selected_trip.get("stops", [])
+    if not trip_stops:
+        return None
+
+    current_trip_stop = next(
+        (stop for stop in trip_stops if stop.get("sequence") == current_stop_seq),
+        None,
+    )
+    if current_trip_stop is None and 0 <= current_stop_seq < len(trip_stops):
+        current_trip_stop = trip_stops[current_stop_seq]
+    if current_trip_stop is None:
+        return None
+
+    current_sched_dt = build_gtfs_datetime(
+        selected_trip["service_date"],
+        current_trip_stop["arrival_time"],
+    )
+    final_sched_dt = build_gtfs_datetime(
+        selected_trip["service_date"],
+        trip_stops[-1]["arrival_time"],
+    )
+    if current_sched_dt is None or final_sched_dt is None:
+        return None
+
+    current_sched_dt = current_sched_dt.replace(tzinfo=UK_TZ)
+    final_sched_dt = final_sched_dt.replace(tzinfo=UK_TZ)
+    delay_min = max(0.0, (local_time - current_sched_dt).total_seconds() / 60.0)
+    eta_min = max(0.5, ((final_sched_dt - local_time).total_seconds() / 60.0) + delay_min)
+
+    return {
+        "eta": round(eta_min, 1),
+        "delay_minutes": round(delay_min, 1),
+        "service_time": format_gtfs_time(selected_trip.get("service_time")),
+        "current_stop_sequence": current_stop_seq,
+        "current_stop_scheduled": current_trip_stop["arrival_time"],
+        "final_stop_scheduled": trip_stops[-1]["arrival_time"],
+    }
+
+
+def apply_eta_guardrail(route, eta_min, eta_method, current_lat, current_lng,
+                        remaining_stops=None, current_time=None, current_stop_seq=None):
+    """Keep live ETA estimates anchored to the matched timetable when available."""
+    if eta_min is None or current_lat is None or current_lng is None:
+        return eta_min, eta_method
+
+    schedule_eta = estimate_schedule_eta_from_position(
+        route,
+        current_lat,
+        current_lng,
+        current_time=current_time,
+        current_stop_seq=current_stop_seq,
+    )
+    if not schedule_eta:
+        return round(float(eta_min), 1), eta_method
+
+    schedule_eta_min = schedule_eta["eta"]
+    eta_value = round(float(eta_min), 1)
+    tolerance_min = max(
+        4.0,
+        float(remaining_stops or 0) * 1.5,
+        schedule_eta_min * 0.4,
+    )
+    max_eta = schedule_eta_min + tolerance_min
+    min_eta = max(0.5, schedule_eta_min - max(3.0, schedule_eta_min * 0.65))
+
+    if eta_value < min_eta or eta_value > max_eta:
+        logger.warning(
+            "[ETA] Guardrail applied for route %s (%s): %.1f via %s replaced with schedule %.1f "
+            "(seq=%s remaining=%s service=%s current_sched=%s final_sched=%s)",
+            route.route_name,
+            route.direction,
+            eta_value,
+            eta_method,
+            schedule_eta_min,
+            schedule_eta["current_stop_sequence"],
+            remaining_stops,
+            schedule_eta["service_time"] or "unknown",
+            schedule_eta["current_stop_scheduled"],
+            schedule_eta["final_stop_scheduled"],
+        )
+        return schedule_eta_min, "schedule_guardrail"
+
+    return eta_value, eta_method
+
+
 def resolve_live_eta(route, log, current_stop_seq, remaining_stops):
     """Resolve the best ETA for a live bus using model first, then formula fallback."""
     if log.bus_lat is None or log.bus_lng is None:
@@ -504,17 +611,44 @@ def resolve_live_eta(route, log, current_stop_seq, remaining_stops):
         current_time=log.timestamp or datetime.now(),
     )
     if current_eta is not None:
-        return current_eta, "xgboost"
+        return apply_eta_guardrail(
+            route,
+            current_eta,
+            "xgboost",
+            log.bus_lat,
+            log.bus_lng,
+            remaining_stops=remaining_stops,
+            current_time=log.timestamp,
+            current_stop_seq=current_stop_seq,
+        )
 
     if log.predicted_eta is not None:
-        return log.predicted_eta, "formula_fallback"
+        return apply_eta_guardrail(
+            route,
+            log.predicted_eta,
+            "formula_fallback",
+            log.bus_lat,
+            log.bus_lng,
+            remaining_stops=remaining_stops,
+            current_time=log.timestamp,
+            current_stop_seq=current_stop_seq,
+        )
 
     fallback_eta = calculate_eta(
         haversine(log.bus_lat, log.bus_lng, route.dest_lat, route.dest_lng),
         log.traffic_delay or 0,
         log.passenger_count or 0,
     )
-    return fallback_eta, "formula_fallback"
+    return apply_eta_guardrail(
+        route,
+        fallback_eta,
+        "formula_fallback",
+        log.bus_lat,
+        log.bus_lng,
+        remaining_stops=remaining_stops,
+        current_time=log.timestamp,
+        current_stop_seq=current_stop_seq,
+    )
 
 
 def calculate_route_delay(route, current_stop_seq, eta_min):
@@ -1717,6 +1851,16 @@ def fusion_engine():
                             vehicle_id,
                             eta_method,
                             eta,
+                        )
+                        eta, eta_method = apply_eta_guardrail(
+                            route,
+                            eta,
+                            eta_method,
+                            bus_lat,
+                            bus_lng,
+                            remaining_stops=remaining_stops,
+                            current_time=datetime.now(UK_TZ),
+                            current_stop_seq=current_stop_seq,
                         )
 
                         delay_minutes = schedule_delay_min
