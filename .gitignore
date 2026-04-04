@@ -42,6 +42,7 @@ runs/
 # Editor
 .vscode/
 .github/
+docs/
 
 # Claude / AI planning docs
 CLAUDE.md
