@@ -49,7 +49,7 @@ If BODS or TomTom API keys are missing, the backend still starts and falls back 
 ```bash
 cd server
 py -3 -m venv venv
-venv\Scripts\activate
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -96,7 +96,7 @@ Loading GTFS data is recommended if you want full stop-by-stop schedule data and
 
 ```bash
 cd server
-venv\Scripts\activate
+.\venv\Scripts\Activate.ps1
 python app.py
 ```
 
@@ -113,6 +113,7 @@ Open `http://localhost:3000`.
 
 Included in the repo:
 
+- `bus_queue.mp4`
 - `server/yolov8n.pt`
 - `server/xgboost_eta_model_72.joblib`
 - `server/xgboost_eta_model_a1.joblib`
@@ -120,10 +121,9 @@ Included in the repo:
 Not committed to GitHub by default:
 
 - `.env`
-- `bus_queue.mp4`
 - `itm_south_west_gtfs.zip`
 
-If `bus_queue.mp4` is missing, the app still starts and crowd counting falls back to `0`.
+`bus_queue.mp4` is the simulated passenger video used by the YOLO crowd-counting demo path, so it should be kept in the repository for a complete submission.
 
 If `itm_south_west_gtfs.zip` is missing, the app still starts and skips GTFS cache warm-up, but stop-level timetable data will be limited.
 

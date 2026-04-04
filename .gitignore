@@ -17,7 +17,6 @@ client/.env.*
 
 # Large data files
 itm_south_west_gtfs.zip
-bus_queue.mp4
 
 # ML run artifacts
 runs/
