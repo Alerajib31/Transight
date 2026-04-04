@@ -70,15 +70,15 @@ npm install
 
 ```bash
 cd server
-py -3 setup_db.py
+python setup_db.py
 ```
 
 ### 5. Seed routes
 
 ```bash
 cd server
-py -3 seed.py
-py -3 seed_a1.py --confirm
+python seed.py
+python seed_a1.py --confirm
 ```
 
 `seed.py` recreates the tables, so run it before `seed_a1.py --confirm`.
@@ -87,7 +87,7 @@ py -3 seed_a1.py --confirm
 
 ```bash
 cd server
-py -3 gtfs_loader.py ../itm_south_west_gtfs.zip
+python gtfs_loader.py ../itm_south_west_gtfs.zip
 ```
 
 Loading GTFS data is recommended if you want full stop-by-stop schedule data and populated A1 route geometry.
@@ -97,7 +97,7 @@ Loading GTFS data is recommended if you want full stop-by-stop schedule data and
 ```bash
 cd server
 venv\Scripts\activate
-py -3 app.py
+python app.py
 ```
 
 ### 8. Start the frontend
@@ -135,8 +135,8 @@ Only retrain after you have collected enough real `BusLog` history. The training
 
 ```bash
 cd server
-py -3 train_xgboost.py --route 72
-py -3 train_xgboost.py --route A1
+python train_xgboost.py --route 72
+python train_xgboost.py --route A1
 ```
 
 This produces:
