@@ -44,6 +44,8 @@ Important variables:
 
 If BODS or TomTom API keys are missing, the backend still starts and falls back where possible.
 
+Before creating the database, make sure your local PostgreSQL server is running and that the username/password in `DATABASE_URL` already exist on your machine.
+
 ### 2. Install backend dependencies
 
 ```bash
