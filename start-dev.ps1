@@ -11,6 +11,7 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $projectRoot "server"
 $frontendDir = Join-Path $projectRoot "client"
 $localNodeDir = Join-Path $projectRoot ".tools\node-v20.20.2-win-x64"
+$backendVenvPython = Join-Path $backendDir "venv\Scripts\python.exe"
 
 function Assert-CommandAvailable {
     param([string]$Name)
@@ -29,6 +30,19 @@ function Get-FrontendCommand {
     return "npm run dev"
 }
 
+function Get-BackendCommand {
+    if (Test-Path $backendVenvPython) {
+        return "& '$backendVenvPython' app.py"
+    }
+
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        return "python app.py"
+    }
+
+    Assert-CommandAvailable -Name "py"
+    return "py -3 app.py"
+}
+
 function Start-DevWindow {
     param(
         [string]$WorkingDirectory,
@@ -40,10 +54,9 @@ function Start-DevWindow {
         -ArgumentList @("-NoExit", "-Command", $Command) | Out-Null
 }
 
-Assert-CommandAvailable -Name "py"
-
 if (-not $FrontendOnly) {
-    Start-DevWindow -WorkingDirectory $backendDir -Command "py -3 app.py"
+    $backendCommand = Get-BackendCommand
+    Start-DevWindow -WorkingDirectory $backendDir -Command $backendCommand
     Write-Host "Backend window started in $backendDir"
 }
 
