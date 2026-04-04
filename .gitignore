@@ -1,8 +1,12 @@
+# Python
 __pycache__/
-runs/
+*.pyc
+*.pyo
+
+# Logs
 *.log
-itm_south_west_gtfs.zip
-NUL
+
+# Environment
 .env
 .env.*
 server/.env
@@ -10,38 +14,44 @@ server/.env.*
 client/.env
 client/.env.*
 !.env.example
-AGENTS.md
-!CLAUDE.md
-NEXT_STEPS.md
-DATA_FLOW.md
-INSTALL.md
-!INSTALL.md
-LICENSE
-SYSTEM_OVERVIEW.md
+
+# Large data files
+itm_south_west_gtfs.zip
+bus_queue.mp4
+
+# ML run artifacts
+runs/
+
+# AI tool configs
 .claude/
 .codex/
-.vscode/
-docs/superpowers/specs/
+.agent/
+.codebuddy/
+.continue/
+.cursor/
+.gemini/
+.kiro/
+.opencode/
+.qoder/
+.roo/
+.trae/
+.windsurf/
 .tools/
-!.planning/
-.agent
-.codebuddy
-.continue
-.cursor
-.gemini
-.github
-.kiro
-.opencode
-.qoder
-.roo
-.trae
-.windsurf
-.vscode
-
 .planning/
 
+# Editor
+.vscode/
+.github/
 
-.tools\node-v20.20.2-win-x64\node_modules\npm\man\man1
+# Claude / AI planning docs
+CLAUDE.md
+AGENTS.md
+INSTALL.md
+NEXT_STEPS.md
+DATA_FLOW.md
+SYSTEM_OVERVIEW.md
 
-A1
-
+# Misc
+NUL
+A1/
+dev.nix
