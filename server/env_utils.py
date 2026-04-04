@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlparse
 
 SERVER_DIR = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SERVER_DIR, ".."))
-DEFAULT_DATABASE_URL = "postgresql://postgres:R%40jibale3138@localhost:5432/transight_db"
+DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/transight_db"
 
 
 def _strip_optional_quotes(value: str) -> str:
