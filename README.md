@@ -8,6 +8,7 @@ Real-time bus tracking and ETA prediction for Bristol bus services.
 - Node.js `20.19+`
 - PostgreSQL `15+`
 - `ffmpeg`
+- Git LFS, because `itm_south_west_gtfs.zip` is stored in the repo via LFS
 
 ## Current Scope
 
@@ -116,6 +117,7 @@ Open `http://localhost:3000`.
 Included in the repo:
 
 - `bus_queue.mp4`
+- `itm_south_west_gtfs.zip` via Git LFS
 - `server/yolov8n.pt`
 - `server/xgboost_eta_model_72.joblib`
 - `server/xgboost_eta_model_a1.joblib`
@@ -123,11 +125,10 @@ Included in the repo:
 Not committed to GitHub by default:
 
 - `.env`
-- `itm_south_west_gtfs.zip`
 
 `bus_queue.mp4` is the simulated passenger video used by the YOLO crowd-counting demo path, so it should be kept in the repository for a complete submission.
 
-If `itm_south_west_gtfs.zip` is missing, the app still starts and skips GTFS cache warm-up, but stop-level timetable data will be limited.
+`itm_south_west_gtfs.zip` is tracked with Git LFS because it exceeds GitHub's normal file-size limit. If it does not download automatically after cloning, run `git lfs pull`.
 
 ## Optional Model Training
 

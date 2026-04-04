@@ -16,7 +16,6 @@ client/.env.*
 !.env.example
 
 # Large data files
-itm_south_west_gtfs.zip
 
 # ML run artifacts
 runs/
