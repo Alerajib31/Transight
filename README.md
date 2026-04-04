@@ -2,6 +2,13 @@
 
 Real-time bus tracking and ETA prediction for Bristol bus services.
 
+## Prerequisites
+
+- Python `3.11+`
+- Node.js `20.19+`
+- PostgreSQL `15+`
+- `ffmpeg`
+
 ## Current Scope
 
 The current MVP tracks:
@@ -22,6 +29,8 @@ ETA prediction now uses route-specific XGBoost models as the primary path for bo
 
 ### 1. Configure environment
 
+Copy `.env.example` to `.env`, then update at least `DATABASE_URL` for your local PostgreSQL instance.
+
 The backend auto-loads the repo-root `.env` file. Process environment variables still override it if needed.
 
 Important variables:
@@ -33,29 +42,96 @@ Important variables:
 - `VIDEO_PATH`
 - `FUSION_INTERVAL`
 
-### 2. Create the database
+If BODS or TomTom API keys are missing, the backend still starts and falls back where possible.
+
+### 2. Install backend dependencies
+
+```bash
+cd server
+py -3 -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+On macOS/Linux, activate the virtual environment with:
+
+```bash
+source venv/bin/activate
+```
+
+### 3. Install frontend dependencies
+
+```bash
+cd client
+npm install
+```
+
+### 4. Create the database
 
 ```bash
 cd server
 py -3 setup_db.py
 ```
 
-### 3. Seed routes
+### 5. Seed routes
 
 ```bash
 cd server
 py -3 seed.py
-py -3 seed_a1.py
+py -3 seed_a1.py --confirm
 ```
 
-### 4. Optional: load GTFS data
+`seed.py` recreates the tables, so run it before `seed_a1.py --confirm`.
+
+### 6. Optional but recommended: load GTFS data
 
 ```bash
 cd server
 py -3 gtfs_loader.py ../itm_south_west_gtfs.zip
 ```
 
-### 5. Train ETA models
+Loading GTFS data is recommended if you want full stop-by-stop schedule data and populated A1 route geometry.
+
+### 7. Start the backend
+
+```bash
+cd server
+venv\Scripts\activate
+py -3 app.py
+```
+
+### 8. Start the frontend
+
+```bash
+cd client
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Included And Optional Assets
+
+Included in the repo:
+
+- `server/yolov8n.pt`
+- `server/xgboost_eta_model_72.joblib`
+- `server/xgboost_eta_model_a1.joblib`
+
+Not committed to GitHub by default:
+
+- `.env`
+- `bus_queue.mp4`
+- `itm_south_west_gtfs.zip`
+
+If `bus_queue.mp4` is missing, the app still starts and crowd counting falls back to `0`.
+
+If `itm_south_west_gtfs.zip` is missing, the app still starts and skips GTFS cache warm-up, but stop-level timetable data will be limited.
+
+## Optional Model Training
+
+Pre-trained route-specific ETA models are already included in the repository, so training is not required for first run.
+
+Only retrain after you have collected enough real `BusLog` history. The training script requires at least `50` usable real rows per route before augmentation.
 
 ```bash
 cd server
@@ -75,35 +151,12 @@ For Route `72`, training also refreshes the legacy compatibility artifact:
 - `server/xgboost_eta_model.joblib`
 - `server/xgboost_eta_metrics.json`
 
-### 6. Start the backend
-
-```bash
-cd server
-py -3 app.py
-```
-
-### 7. Start the frontend
-
-```bash
-cd client
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
 ## Development Helpers
 
 Windows one-command start:
 
 ```powershell
 .\start-dev.ps1
-```
-
-Windows local Node shell:
-
-```powershell
-. .\use-local-node.ps1
 ```
 
 ## API Summary
@@ -133,6 +186,7 @@ Live ETA responses now include an `eta_method` field so you can verify whether t
 - If BODS or TomTom keys are unavailable, the app still starts and falls back where possible.
 - The backend batches BODS requests by allowed operators instead of using the unrestricted national feed.
 - On Windows, prefer `py -3` if `python` is not on `PATH`.
+- For Vite 7, use Node.js `20.19+` to avoid version warnings during `npm run dev`.
 
 ## Remaining Roadmap
 
