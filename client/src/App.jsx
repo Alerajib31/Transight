@@ -465,7 +465,6 @@ export default function App() {
     activeBus?.stop_predictions?.length > 0
       ? activeBus.stop_predictions
       : routePredictions.stops;
-  const showingLivePredictions = activeBus?.stop_predictions?.length > 0;
   const getStopPrediction = (routeStop) =>
     displayStopPredictions.find((prediction) => {
       if (prediction.stop_id && routeStop.stop?.stop_id) {
