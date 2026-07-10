@@ -317,6 +317,7 @@ export default function App() {
               traffic_delay: data.status.traffic_delay,
               scheduled_service_time: data.status.scheduled_service_time,
               delay_minutes: data.status.delay_minutes,
+              eta_method: data.eta_method,
             }];
           } else {
             nextBuses = [];
@@ -625,6 +626,15 @@ export default function App() {
                     )}
                     {bus.delay_minutes > 0 && (
                       <p className="text-xs text-danger">{Math.round(bus.delay_minutes)} min late</p>
+                    )}
+                    {bus.eta_method && (
+                      <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium ${
+                        bus.eta_method === "xgboost"
+                          ? "bg-accent/15 text-accent"
+                          : "bg-text-secondary/10 text-text-secondary"
+                      }`}>
+                        {bus.eta_method === "xgboost" ? "XGBoost" : bus.eta_method === "routing" ? "Routing" : "Formula"}
+                      </span>
                     )}
                   </button>
                 ))}
