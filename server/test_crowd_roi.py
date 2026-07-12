@@ -1,4 +1,4 @@
-"""Test crowd left-ROI filter (no Fusion Engine, no database).
+"""Test crowd left-ROI + ground-line filter (no Fusion Engine, no database).
 
 Verifies:
   1. CROWD_ROI_X_FRACTION is a sane fraction of frame width.
@@ -7,8 +7,19 @@ Verifies:
   3. count_passengers gracefully returns 0 for a missing video file.
   4. (optional) count_passengers returns a non-negative int on the real
      VIDEO_PATH/model if both are present on this machine; otherwise skips.
+  5. CROWD_ROI_Y_MIN_FRACTION and _is_waiting_passenger correctly exclude
+     in-bus (window-level) detections while keeping pavement detections,
+     and fail open per-dimension when frame_width/frame_height is unknown.
 """
-from app import CROWD_ROI_X_FRACTION, MODEL_PATH, VIDEO_PATH, _center_in_left_roi, count_passengers
+from app import (
+    CROWD_ROI_X_FRACTION,
+    CROWD_ROI_Y_MIN_FRACTION,
+    MODEL_PATH,
+    VIDEO_PATH,
+    _center_in_left_roi,
+    _is_waiting_passenger,
+    count_passengers,
+)
 import os
 
 FRAME_WIDTH = 1000
@@ -60,5 +71,50 @@ if os.path.exists(VIDEO_PATH) and os.path.exists(MODEL_PATH):
         print(f"SKIP: live video/model present but call raised {type(exc).__name__}: {exc}")
 else:
     print(f"SKIP: live video/model not both present (VIDEO_PATH={VIDEO_PATH}, MODEL_PATH={MODEL_PATH})")
+
+# 5. Ground-line vertical filter (_is_waiting_passenger). Uses FRAME_WIDTH=1020,
+# FRAME_HEIGHT=600 to match test.py's resized frame dimensions.
+GL_FRAME_WIDTH = 1020
+GL_FRAME_HEIGHT = 600
+
+# 5a. Constant sanity
+assert 0.0 <= CROWD_ROI_Y_MIN_FRACTION <= 0.95, (
+    f"CROWD_ROI_Y_MIN_FRACTION out of range: {CROWD_ROI_Y_MIN_FRACTION}"
+)
+print(f"OK: CROWD_ROI_Y_MIN_FRACTION={CROWD_ROI_Y_MIN_FRACTION} (ground line y={GL_FRAME_HEIGHT * CROWD_ROI_Y_MIN_FRACTION:.1f}px of {GL_FRAME_HEIGHT}px)")
+
+# 5b. In-bus-style detection: center in left ROI but box bottom (y2) cut off
+# at the window sill (~0.46 of height) -> excluded.
+assert _is_waiting_passenger(150, 200, 240, 276, GL_FRAME_WIDTH, GL_FRAME_HEIGHT) is False, (
+    "In-bus detection (window-level y2) should be excluded"
+)
+print("OK: in-bus detection (left ROI, y2~0.46 height) is excluded")
+
+# 5c. Pavement detection: center in left ROI, box bottom (y2) reaches the
+# ground line (~0.8 of height) -> counted.
+assert _is_waiting_passenger(150, 300, 240, 480, GL_FRAME_WIDTH, GL_FRAME_HEIGHT) is True, (
+    "Pavement detection (left ROI, y2~0.8 height) should be counted"
+)
+print("OK: pavement detection (left ROI, y2~0.8 height) is counted")
+
+# 5d. Right-side pavement detection: fails the x-check regardless of y2.
+assert _is_waiting_passenger(900, 300, 990, 480, GL_FRAME_WIDTH, GL_FRAME_HEIGHT) is False, (
+    "Right-side detection should be excluded by the x-check"
+)
+print("OK: right-side pavement detection (center ~90% width) is excluded by x-check")
+
+# 5e. Fail-open on unknown height: left-ROI center, height unknown -> y-check
+# skipped, so the detection is counted regardless of y2.
+assert _is_waiting_passenger(150, 0, 240, 10, GL_FRAME_WIDTH, 0) is True, (
+    "Unknown frame_height should fail open (y-check skipped)"
+)
+print("OK: unknown frame_height fails open (y-check skipped, count preserved)")
+
+# 5f. Fail-open on unknown width: width unknown -> x-check skipped; y2=590
+# still passes the ground line, so the combined result is True.
+assert _is_waiting_passenger(0, 0, 10, 590, 0, GL_FRAME_HEIGHT) is True, (
+    "Unknown frame_width should fail open (x-check skipped)"
+)
+print("OK: unknown frame_width fails open (x-check skipped, count preserved)")
 
 print("ALL CROWD-ROI CHECKS PASSED")
