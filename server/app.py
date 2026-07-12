@@ -128,6 +128,17 @@ CROWD_DETECTION_RADIUS_KM = 0.3  # 300 meters
 # Store recent crowd counts for smoothing (prevents fluctuation)
 _crowd_history = {}
 MAX_CROWD_HISTORY = 3  # Average last 3 readings
+
+# Fraction of frame width (measured from the LEFT edge) that counts as the
+# passenger waiting area. The bus body occupies the right side of the frame,
+# so only person detections whose horizontal center falls left of this
+# boundary are counted. Override via the CROWD_ROI_X_FRACTION env var.
+try:
+    CROWD_ROI_X_FRACTION = float(os.getenv("CROWD_ROI_X_FRACTION", "0.5"))
+except ValueError:
+    CROWD_ROI_X_FRACTION = 0.5
+CROWD_ROI_X_FRACTION = min(max(CROWD_ROI_X_FRACTION, 0.05), 1.0)  # clamp to (0.05, 1.0]
+
 _latest_bus_metadata = {}
 _eta_models: dict[str, object] = {}
 _tomtom_service_state = {
@@ -1381,6 +1392,17 @@ def get_yolo_model():
     return _yolo_model
 
 
+def _center_in_left_roi(x1: float, x2: float, frame_width: int) -> bool:
+    """Return True if a detection's horizontal center lies within the left
+    region of the frame defined by CROWD_ROI_X_FRACTION. Fails open (counts
+    the detection) when frame_width is unknown, so ROI logic never silently
+    zeroes out a valid crowd reading."""
+    if frame_width <= 0:
+        return True
+    center_x = (x1 + x2) / 2.0
+    return center_x <= frame_width * CROWD_ROI_X_FRACTION
+
+
 def count_passengers(video_path: str) -> int:
     """
     Run YOLOv8 on one frame of the simulated camera feed.
@@ -1417,15 +1439,23 @@ def count_passengers(video_path: str) -> int:
     # Run YOLO detection
     model = get_yolo_model()
     results = model(frame, verbose=False)
-    
-    # Count persons (class 0)
+
+    # Count persons (class 0) whose bounding-box center is in the left ROI.
+    # The bus occupies the right side of the frame; see CROWD_ROI_X_FRACTION.
+    frame_width = frame.shape[1] if frame is not None else 0
     count = 0
     for r in results:
         for box in r.boxes:
-            if int(box.cls[0]) == 0:
+            if int(box.cls[0]) != 0:
+                continue
+            x1, _, x2, _ = box.xyxy[0].tolist()
+            if _center_in_left_roi(x1, x2, frame_width):
                 count += 1
-    
-    logger.info(f"[YOLO] Frame {_frame_number}: {count} person(s)")
+
+    logger.info(
+        f"[YOLO] Frame {_frame_number}: {count} person(s) in left ROI "
+        f"(x <= {CROWD_ROI_X_FRACTION:.0%} of width)"
+    )
     return count
 
 
