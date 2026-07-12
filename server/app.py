@@ -122,6 +122,37 @@ MAJOR_STOPS_INBOUND = [
     ("Temple Meads Stn", 51.44898, -2.58262),
 ]
 
+A1_MAJOR_STOPS_OUTBOUND = [
+    ("Bus Station", 51.45909, -2.59294),
+    ("The Centre", 51.45381, -2.59696),
+    ("Queen Square", 51.45051, -2.59646),
+    ("Temple Meads Stn", 51.44898, -2.58262),
+    ("Bedminster Parade", 51.44431, -2.59315),
+    ("Airport Tavern", 51.38727, -2.70061),
+    ("Public Transport Interchange", 51.38743, -2.70987),
+]
+
+A1_MAJOR_STOPS_INBOUND = [
+    ("Public Transport Interchange", 51.38743, -2.70987),
+    ("Airport Tavern", 51.38838, -2.70006),
+    ("Winford Arms", 51.41049, -2.64689),
+    ("Temple Meads Stn", 51.44902, -2.58579),
+    ("Queen Square", 51.45116, -2.59652),
+    ("The Centre", 51.45409, -2.59694),
+    ("Bus Station", 51.45909, -2.59294),
+]
+
+FALLBACK_MAJOR_STOPS_BY_ROUTE = {
+    "72": {
+        "outbound": MAJOR_STOPS_OUTBOUND,
+        "inbound": MAJOR_STOPS_INBOUND,
+    },
+    "A1": {
+        "outbound": A1_MAJOR_STOPS_OUTBOUND,
+        "inbound": A1_MAJOR_STOPS_INBOUND,
+    },
+}
+
 # Distance threshold to consider bus "at" a major stop (in km)
 CROWD_DETECTION_RADIUS_KM = 0.3  # 300 meters
 
@@ -898,8 +929,8 @@ def get_smoothed_crowd_count(vehicle_id, current_count):
 def is_near_major_stop(bus_lat: float, bus_lng: float, route) -> tuple:
     """
     Check if bus is near a major stop where crowd detection should be applied.
-    Uses the route's actual stops from the database. Falls back to hardcoded
-    Route 72 constants if the route has no database stops loaded yet.
+    Uses the route's actual stops from the database. Falls back to route-specific
+    hardcoded constants if the route has no database stops loaded yet.
 
     Args:
         bus_lat: Current bus latitude.
@@ -919,16 +950,24 @@ def is_near_major_stop(bus_lat: float, bus_lng: float, route) -> tuple:
     except Exception:
         candidate_stops = []
 
-    # Fall back to hardcoded Route 72 constants when DB stops unavailable
+    # Fall back to route-specific hardcoded constants when DB stops unavailable.
     if not candidate_stops:
-        direction = getattr(route, 'direction', 'outbound')
-        candidate_stops = (
-            MAJOR_STOPS_OUTBOUND if direction == 'outbound' else MAJOR_STOPS_INBOUND
-        )
-        logger.debug(
-            f"[Crowd] is_near_major_stop: no DB stops for {route.route_name} "
-            f"({route.direction}); using hardcoded fallback"
-        )
+        route_name = (getattr(route, 'route_name', '') or '').strip().upper()
+        direction = (getattr(route, 'direction', 'outbound') or 'outbound').strip().lower()
+        fallback_stops = FALLBACK_MAJOR_STOPS_BY_ROUTE.get(route_name, {})
+        candidate_stops = fallback_stops.get(direction, [])
+
+        if candidate_stops:
+            logger.debug(
+                f"[Crowd] is_near_major_stop: no DB stops for {route.route_name} "
+                f"({route.direction}); using {route_name} hardcoded fallback"
+            )
+        else:
+            logger.warning(
+                f"[Crowd] is_near_major_stop: no DB stops and no hardcoded fallback "
+                f"for {route.route_name} ({route.direction})"
+            )
+            return False, None, float('inf')
 
     min_dist = float('inf')
     nearest_stop = None
