@@ -134,10 +134,37 @@ function buildTrendPoints(points, metricKey, width = 360, height = 180) {
   return { path, points: svgPoints, minValue, midValue, maxValue, chart, width, height };
 }
 
+function buildXAxisTicks(points, maxTicks = 4) {
+  if (points.length === 0) {
+    return [];
+  }
+
+  if (points.length === 1) {
+    return [{ x: points[0].x, label: formatHistoryTime(points[0].timestamp), anchor: "middle" }];
+  }
+
+  const count = Math.min(maxTicks, points.length);
+  const ticks = [];
+  const seen = new Set();
+
+  for (let i = 0; i < count; i += 1) {
+    const index = Math.round((i / (count - 1)) * (points.length - 1));
+    if (seen.has(index)) {
+      continue;
+    }
+    seen.add(index);
+    const anchor = i === 0 ? "start" : i === count - 1 ? "end" : "middle";
+    ticks.push({ x: points[index].x, label: formatHistoryTime(points[index].timestamp), anchor });
+  }
+
+  return ticks;
+}
+
 function MetricTrendCard({ metric, history, theme }) {
   const accent = theme === "dark" ? metric.accent.dark : metric.accent.light;
   const stat = history.stats?.[metric.key] ?? null;
   const trend = buildTrendPoints(history.points ?? [], metric.key);
+  const xTicks = buildXAxisTicks(trend.points);
   const latestPoint = history.points?.[history.points.length - 1] ?? null;
   const earliestPoint = history.points?.[0] ?? null;
 
@@ -206,6 +233,17 @@ function MetricTrendCard({ metric, history, theme }) {
           >
             {metric.yAxisLabel}
           </text>
+          {xTicks.map((tick, index) => (
+            <text
+              key={`${metric.key}-xtick-${index}`}
+              x={tick.x}
+              y={trend.height - trend.chart.bottom + 16}
+              textAnchor={tick.anchor}
+              className="fill-text-secondary text-[9px]"
+            >
+              {tick.label}
+            </text>
+          ))}
           <text
             x={(trend.chart.left + trend.width - trend.chart.right) / 2}
             y={trend.height - 8}
