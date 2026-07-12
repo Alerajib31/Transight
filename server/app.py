@@ -139,6 +139,19 @@ except ValueError:
     CROWD_ROI_X_FRACTION = 0.5
 CROWD_ROI_X_FRACTION = min(max(CROWD_ROI_X_FRACTION, 0.05), 1.0)  # clamp to (0.05, 1.0]
 
+# Fraction of frame HEIGHT (measured from the TOP edge) that marks the
+# ground line. A detection only counts when its bounding-box BOTTOM (y2)
+# reaches at or below this line, i.e. y2 >= frame_height * this fraction.
+# People sitting inside the bus are cut off at the window sill (box bottom
+# ~0.46 of height) and fall ABOVE this line, so they are excluded;
+# passengers standing on the pavement (box bottom ~0.65+) are kept.
+# Override via the CROWD_ROI_Y_MIN_FRACTION env var.
+try:
+    CROWD_ROI_Y_MIN_FRACTION = float(os.getenv("CROWD_ROI_Y_MIN_FRACTION", "0.6"))
+except ValueError:
+    CROWD_ROI_Y_MIN_FRACTION = 0.6
+CROWD_ROI_Y_MIN_FRACTION = min(max(CROWD_ROI_Y_MIN_FRACTION, 0.0), 0.95)  # clamp to [0.0, 0.95]
+
 _latest_bus_metadata = {}
 _eta_models: dict[str, object] = {}
 _tomtom_service_state = {
@@ -1403,6 +1416,23 @@ def _center_in_left_roi(x1: float, x2: float, frame_width: int) -> bool:
     return center_x <= frame_width * CROWD_ROI_X_FRACTION
 
 
+def _is_waiting_passenger(
+    x1: float, y1: float, x2: float, y2: float,
+    frame_width: int, frame_height: int,
+) -> bool:
+    """Return True if a person detection is a waiting passenger on the
+    pavement: horizontal center within the left ROI (CROWD_ROI_X_FRACTION)
+    AND bounding-box bottom (y2) at/below the ground line
+    (CROWD_ROI_Y_MIN_FRACTION). Fails open per-dimension when frame_width
+    or frame_height is unknown (<= 0), matching _center_in_left_roi, so
+    the ROI logic never silently zeroes a valid crowd reading."""
+    if not _center_in_left_roi(x1, x2, frame_width):
+        return False
+    if frame_height <= 0:
+        return True
+    return y2 >= frame_height * CROWD_ROI_Y_MIN_FRACTION
+
+
 def count_passengers(video_path: str) -> int:
     """
     Run YOLOv8 on one frame of the simulated camera feed.
@@ -1440,21 +1470,25 @@ def count_passengers(video_path: str) -> int:
     model = get_yolo_model()
     results = model(frame, verbose=False)
 
-    # Count persons (class 0) whose bounding-box center is in the left ROI.
-    # The bus occupies the right side of the frame; see CROWD_ROI_X_FRACTION.
+    # Count persons (class 0) that are waiting passengers on the pavement:
+    # horizontal center in the left ROI AND bounding-box bottom at/below the
+    # ground line. See CROWD_ROI_X_FRACTION and CROWD_ROI_Y_MIN_FRACTION.
+    # This excludes people visible through the bus windows, whose boxes are
+    # cut off at the window sill well above the ground line.
     frame_width = frame.shape[1] if frame is not None else 0
+    frame_height = frame.shape[0] if frame is not None else 0
     count = 0
     for r in results:
         for box in r.boxes:
             if int(box.cls[0]) != 0:
                 continue
-            x1, _, x2, _ = box.xyxy[0].tolist()
-            if _center_in_left_roi(x1, x2, frame_width):
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            if _is_waiting_passenger(x1, y1, x2, y2, frame_width, frame_height):
                 count += 1
 
     logger.info(
-        f"[YOLO] Frame {_frame_number}: {count} person(s) in left ROI "
-        f"(x <= {CROWD_ROI_X_FRACTION:.0%} of width)"
+        f"[YOLO] Frame {_frame_number}: {count} waiting passenger(s) "
+        f"(x <= {CROWD_ROI_X_FRACTION:.0%} width, y2 >= {CROWD_ROI_Y_MIN_FRACTION:.0%} height)"
     )
     return count
 
