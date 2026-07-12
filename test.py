@@ -21,7 +21,7 @@ VIDEO_PATH = os.path.join(BASE_DIR, "bus_queue.mp4")
 # standalone. Frame is resized to 1020x600 below, so fractions are
 # measured against those resized dimensions.
 CROWD_ROI_X_FRACTION = 0.5
-CROWD_ROI_Y_MIN_FRACTION = 0.6
+CROWD_ROI_Y_MIN_FRACTION = 0.5
 
 
 def is_waiting_passenger(x1, y1, x2, y2, frame_width, frame_height):

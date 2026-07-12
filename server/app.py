@@ -143,13 +143,13 @@ CROWD_ROI_X_FRACTION = min(max(CROWD_ROI_X_FRACTION, 0.05), 1.0)  # clamp to (0.
 # ground line. A detection only counts when its bounding-box BOTTOM (y2)
 # reaches at or below this line, i.e. y2 >= frame_height * this fraction.
 # People sitting inside the bus are cut off at the window sill (box bottom
-# ~0.46 of height) and fall ABOVE this line, so they are excluded;
-# passengers standing on the pavement (box bottom ~0.65+) are kept.
-# Override via the CROWD_ROI_Y_MIN_FRACTION env var.
+# ~0.43-0.46 of height) and fall ABOVE this line, so they are excluded;
+# waiting passengers are kept even when luggage hides their lower body
+# (box bottom ~0.55+). Override via the CROWD_ROI_Y_MIN_FRACTION env var.
 try:
-    CROWD_ROI_Y_MIN_FRACTION = float(os.getenv("CROWD_ROI_Y_MIN_FRACTION", "0.6"))
+    CROWD_ROI_Y_MIN_FRACTION = float(os.getenv("CROWD_ROI_Y_MIN_FRACTION", "0.5"))
 except ValueError:
-    CROWD_ROI_Y_MIN_FRACTION = 0.6
+    CROWD_ROI_Y_MIN_FRACTION = 0.5
 CROWD_ROI_Y_MIN_FRACTION = min(max(CROWD_ROI_Y_MIN_FRACTION, 0.0), 0.95)  # clamp to [0.0, 0.95]
 
 _latest_bus_metadata = {}
