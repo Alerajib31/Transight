@@ -130,27 +130,50 @@ _crowd_history = {}
 MAX_CROWD_HISTORY = 3  # Average last 3 readings
 
 # Fraction of frame width (measured from the LEFT edge) that counts as the
-# passenger waiting area. The bus body occupies the right side of the frame,
-# so only person detections whose horizontal center falls left of this
-# boundary are counted. Override via the CROWD_ROI_X_FRACTION env var.
+# passenger waiting area. OFF BY DEFAULT (1.0 = no-op, whole frame width
+# included): bus-aware exclusion (BUS_CONTAINMENT_MIN / BUS_INTERIOR_Y_FRACTION
+# below) is the active mechanism for separating waiting passengers from
+# people inside the bus. This fraction remains available as an optional
+# manual tightening knob via the CROWD_ROI_X_FRACTION env var.
 try:
-    CROWD_ROI_X_FRACTION = float(os.getenv("CROWD_ROI_X_FRACTION", "0.5"))
+    CROWD_ROI_X_FRACTION = float(os.getenv("CROWD_ROI_X_FRACTION", "1.0"))
 except ValueError:
-    CROWD_ROI_X_FRACTION = 0.5
+    CROWD_ROI_X_FRACTION = 1.0
 CROWD_ROI_X_FRACTION = min(max(CROWD_ROI_X_FRACTION, 0.05), 1.0)  # clamp to (0.05, 1.0]
 
 # Fraction of frame HEIGHT (measured from the TOP edge) that marks the
-# ground line. A detection only counts when its bounding-box BOTTOM (y2)
-# reaches at or below this line, i.e. y2 >= frame_height * this fraction.
-# People sitting inside the bus are cut off at the window sill (box bottom
-# ~0.43-0.46 of height) and fall ABOVE this line, so they are excluded;
-# waiting passengers are kept even when luggage hides their lower body
-# (box bottom ~0.55+). Override via the CROWD_ROI_Y_MIN_FRACTION env var.
+# ground line. OFF BY DEFAULT (0.0 = no-op, every detection passes the
+# ground-line check): bus-aware exclusion (BUS_CONTAINMENT_MIN /
+# BUS_INTERIOR_Y_FRACTION below) is the active mechanism for excluding
+# people visible through the bus windows. This fraction remains available
+# as an optional manual tightening knob via the CROWD_ROI_Y_MIN_FRACTION
+# env var.
 try:
-    CROWD_ROI_Y_MIN_FRACTION = float(os.getenv("CROWD_ROI_Y_MIN_FRACTION", "0.5"))
+    CROWD_ROI_Y_MIN_FRACTION = float(os.getenv("CROWD_ROI_Y_MIN_FRACTION", "0.0"))
 except ValueError:
-    CROWD_ROI_Y_MIN_FRACTION = 0.5
+    CROWD_ROI_Y_MIN_FRACTION = 0.0
 CROWD_ROI_Y_MIN_FRACTION = min(max(CROWD_ROI_Y_MIN_FRACTION, 0.0), 0.95)  # clamp to [0.0, 0.95]
+
+# Fraction of a PERSON box area that must fall inside a detected bus box
+# (class 5) for that person to be considered "inside the bus". Override via
+# the BUS_CONTAINMENT_MIN env var.
+try:
+    BUS_CONTAINMENT_MIN = float(os.getenv("BUS_CONTAINMENT_MIN", "0.85"))
+except ValueError:
+    BUS_CONTAINMENT_MIN = 0.85
+BUS_CONTAINMENT_MIN = min(max(BUS_CONTAINMENT_MIN, 0.0), 1.0)  # clamp to [0.0, 1.0]
+
+# Fraction of bus box HEIGHT (measured from the TOP edge, bus_y1) that marks
+# the bus interior line: interior_line = bus_y1 + fraction * bus_height. A
+# contained person whose box bottom (y2) is ABOVE this line is behind the
+# glass and excluded; a contained person whose box bottom is at/below this
+# line is at the door/pavement and still counted. Override via the
+# BUS_INTERIOR_Y_FRACTION env var.
+try:
+    BUS_INTERIOR_Y_FRACTION = float(os.getenv("BUS_INTERIOR_Y_FRACTION", "0.7"))
+except ValueError:
+    BUS_INTERIOR_Y_FRACTION = 0.7
+BUS_INTERIOR_Y_FRACTION = min(max(BUS_INTERIOR_Y_FRACTION, 0.0), 1.0)  # clamp to [0.0, 1.0]
 
 _latest_bus_metadata = {}
 _eta_models: dict[str, object] = {}
@@ -1433,6 +1456,40 @@ def _is_waiting_passenger(
     return y2 >= frame_height * CROWD_ROI_Y_MIN_FRACTION
 
 
+def _person_overlap_fraction(
+    person: tuple[float, float, float, float],
+    bus: tuple[float, float, float, float],
+) -> float:
+    """Return the fraction of the PERSON box area that overlaps the bus box.
+    1.0 means the person box is fully contained inside the bus box; 0.0 means
+    no overlap at all."""
+    px1, py1, px2, py2 = person
+    bx1, by1, bx2, by2 = bus
+    intersect_w = max(0.0, min(px2, bx2) - max(px1, bx1))
+    intersect_h = max(0.0, min(py2, by2) - max(py1, by1))
+    person_area = max(1.0, (px2 - px1) * (py2 - py1))
+    return (intersect_w * intersect_h) / person_area
+
+
+def _is_inside_bus(
+    person: tuple[float, float, float, float],
+    buses: list[tuple[float, float, float, float]],
+) -> bool:
+    """Return True if a person detection is "inside the bus" (behind glass)
+    and should be excluded from the count: the person box must be at least
+    BUS_CONTAINMENT_MIN contained within a bus box AND its bottom (y2) must
+    be ABOVE the bus interior line (bus_y1 + BUS_INTERIOR_Y_FRACTION *
+    bus_height). Fails open (returns False) when buses is empty, so a
+    missing bus detection never zeroes out the crowd count."""
+    for bus in buses:
+        if _person_overlap_fraction(person, bus) >= BUS_CONTAINMENT_MIN:
+            bus_y1, bus_y2 = bus[1], bus[3]
+            interior_line = bus_y1 + BUS_INTERIOR_Y_FRACTION * (bus_y2 - bus_y1)
+            if person[3] < interior_line:
+                return True
+    return False
+
+
 def count_passengers(video_path: str) -> int:
     """
     Run YOLOv8 on one frame of the simulated camera feed.
@@ -1470,25 +1527,38 @@ def count_passengers(video_path: str) -> int:
     model = get_yolo_model()
     results = model(frame, verbose=False)
 
-    # Count persons (class 0) that are waiting passengers on the pavement:
-    # horizontal center in the left ROI AND bounding-box bottom at/below the
-    # ground line. See CROWD_ROI_X_FRACTION and CROWD_ROI_Y_MIN_FRACTION.
-    # This excludes people visible through the bus windows, whose boxes are
-    # cut off at the window sill well above the ground line.
+    # Count persons (class 0) as waiting passengers unless they are "inside
+    # the bus": heavily contained within a detected bus box (class 5) AND
+    # sitting above the bus interior line (behind the glass). See
+    # BUS_CONTAINMENT_MIN and BUS_INTERIOR_Y_FRACTION. No bus detected means
+    # nobody is excluded (fail open). CROWD_ROI_X_FRACTION /
+    # CROWD_ROI_Y_MIN_FRACTION remain available as an optional manual
+    # pre-filter but are no-ops by default.
     frame_width = frame.shape[1] if frame is not None else 0
     frame_height = frame.shape[0] if frame is not None else 0
-    count = 0
+    persons: list[tuple[float, float, float, float]] = []
+    buses: list[tuple[float, float, float, float]] = []
     for r in results:
         for box in r.boxes:
-            if int(box.cls[0]) != 0:
-                continue
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            if _is_waiting_passenger(x1, y1, x2, y2, frame_width, frame_height):
-                count += 1
+            cls = int(box.cls[0])
+            if cls == 0:
+                persons.append(tuple(box.xyxy[0].tolist()))
+            elif cls == 5:
+                buses.append(tuple(box.xyxy[0].tolist()))
+
+    count = 0
+    excluded = 0
+    for x1, y1, x2, y2 in persons:
+        if not _is_waiting_passenger(x1, y1, x2, y2, frame_width, frame_height):
+            continue
+        if _is_inside_bus((x1, y1, x2, y2), buses):
+            excluded += 1
+            continue
+        count += 1
 
     logger.info(
-        f"[YOLO] Frame {_frame_number}: {count} waiting passenger(s) "
-        f"(x <= {CROWD_ROI_X_FRACTION:.0%} width, y2 >= {CROWD_ROI_Y_MIN_FRACTION:.0%} height)"
+        f"[YOLO] Frame {_frame_number}: {count} waiting passenger(s), "
+        f"{excluded} excluded as in-bus ({len(buses)} bus box(es) detected)"
     )
     return count
 
