@@ -66,6 +66,9 @@ LIVE_TRIP_MAX_LATE_MINUTES = float(os.getenv("LIVE_TRIP_MAX_LATE_MINUTES", "25")
 ORIGIN_STAGING_RADIUS_KM = float(os.getenv("ORIGIN_STAGING_RADIUS_KM", "0.15"))
 TERMINAL_ARRIVAL_RADIUS_KM = float(os.getenv("TERMINAL_ARRIVAL_RADIUS_KM", "0.15"))
 ORIGIN_EARLY_DISPLAY_MINUTES = float(os.getenv("ORIGIN_EARLY_DISPLAY_MINUTES", "4"))
+# Dwell-time model: dwell_time = BASE_DWELL_SECONDS + passenger_count * PER_PASSENGER_SECONDS
+BASE_DWELL_SECONDS = float(os.getenv("BASE_DWELL_SECONDS", "15"))       # base door open/close time
+PER_PASSENGER_SECONDS = float(os.getenv("PER_PASSENGER_SECONDS", "3.5"))  # boarding time per passenger
 UK_TZ = ZoneInfo("Europe/London")
 
 _operator_allowlist = [op.strip() for op in os.getenv("BODS_OPERATOR_ALLOWLIST", "FBRI,FBRA").split(",") if op.strip()]
@@ -1614,6 +1617,14 @@ def cleanup_video_resources():
 # =========================================================================
 # ETA Calculation
 # =========================================================================
+def estimate_dwell_seconds(passenger_count: int) -> float:
+    """Convert a YOLOv8 passenger count into estimated stop dwell time in seconds.
+
+    dwell_time = BASE_DWELL_SECONDS + passenger_count * PER_PASSENGER_SECONDS
+    """
+    return BASE_DWELL_SECONDS + (passenger_count or 0) * PER_PASSENGER_SECONDS
+
+
 def calculate_eta(distance_km, traffic_delay_seconds, passenger_count, bus_speed=None):
     """
     Calculate ETA using:
@@ -1631,8 +1642,8 @@ def calculate_eta(distance_km, traffic_delay_seconds, passenger_count, bus_speed
     # Traffic delay
     traffic_min = traffic_delay_seconds / 60
     
-    # Passenger boarding delay (10 seconds per person - increased for more impact)
-    crowd_min = (passenger_count * 10) / 60
+    # Passenger dwell delay: dwell_time = 15 + (count x 3.5) seconds
+    crowd_min = estimate_dwell_seconds(passenger_count) / 60
     
     # Total ETA
     eta_min = base_time_min + traffic_min + crowd_min
@@ -1669,8 +1680,8 @@ def calculate_eta_with_routing(base_time_min, passenger_count,
     # Adjust base time for bus speed (TomTom gives car time)
     adjusted_base_time = base_time_min * BUS_SPEED_FACTOR
     
-    # Passenger boarding delay (15 seconds per person - more realistic)
-    crowd_min = (passenger_count * 15) / 60
+    # Passenger dwell delay: dwell_time = 15 + (count x 3.5) seconds
+    crowd_min = estimate_dwell_seconds(passenger_count) / 60
     
     # Stop dwell time: 1.5 minutes per stop on average
     # This accounts for boarding, alighting, and traffic light cycles
@@ -2732,6 +2743,35 @@ def get_status(route_id):
         "bus_count": len(bus_list),
         "buses": bus_list,
         "timestamp": response_timestamp,
+    })
+
+
+@app.route("/api/cv-count", methods=["GET"])
+def get_cv_count():
+    """Return the most recent YOLOv8 passenger count recorded by the Fusion Engine."""
+    latest_log = (
+        BusLog.query
+        .filter(BusLog.passenger_count.isnot(None))
+        .order_by(BusLog.timestamp.desc())
+        .first()
+    )
+
+    if latest_log is None:
+        return jsonify({
+            "passenger_count": 0,
+            "vehicle_id": None,
+            "route_id": None,
+            "timestamp": None,
+            "source": "yolov8",
+            "message": "No passenger count recorded yet",
+        })
+
+    return jsonify({
+        "passenger_count": latest_log.passenger_count or 0,
+        "vehicle_id": latest_log.vehicle_id,
+        "route_id": latest_log.route_id,
+        "timestamp": latest_log.timestamp.isoformat() if latest_log.timestamp else None,
+        "source": "yolov8",
     })
 
 

@@ -5,6 +5,7 @@ Run: python generate_synthetic_data.py --route 72
 
 import argparse
 import logging
+import math
 import random
 from datetime import datetime, timedelta
 
@@ -29,10 +30,54 @@ FEATURE_COLUMNS = [
 ]
 DEFAULT_ROWS = 4000
 
+# Passenger boarding demand per stop is modelled as a Poisson process; these are
+# the rate parameters (lambda) for peak vs off-peak periods, per route. Route 72
+# uses the peak/off-peak rates cited in the report; A1 (airport express) carries
+# lighter, more even loads.
+ROUTE_PASSENGER_LAMBDAS = {
+    "72": {"peak": 12.0, "offpeak": 4.0},
+    "a1": {"peak": 10.0, "offpeak": 3.0},
+}
+DEFAULT_PASSENGER_LAMBDAS = {"peak": 10.0, "offpeak": 4.0}
+
+# Rush-hour demand is modelled as a bimodal Gaussian over the hour of day,
+# peaking at the morning (08:00) and evening (17:00) commutes.
+MORNING_PEAK_HOUR = 8.0
+EVENING_PEAK_HOUR = 17.0
+PEAK_HOUR_STD = 1.5
+MORNING_PEAK_SHARE = 0.35
+EVENING_PEAK_SHARE = 0.35
+
 
 def normalize_route_name(route_name):
     """Normalize a route name for file paths and case-insensitive lookups."""
     return (route_name or "").strip().lower()
+
+
+def _poisson_sample(rng: random.Random, lam: float) -> int:
+    """Draw a Poisson-distributed passenger count for rate lambda (Knuth's algorithm)."""
+    if lam <= 0:
+        return 0
+    threshold = math.exp(-lam)
+    count = 0
+    product = 1.0
+    while True:
+        count += 1
+        product *= rng.random()
+        if product <= threshold:
+            return count - 1
+
+
+def _sample_hour_of_day(rng: random.Random) -> int:
+    """Sample an hour (0-23) from a bimodal Gaussian peaking at 08:00 and 17:00."""
+    roll = rng.random()
+    if roll < MORNING_PEAK_SHARE:
+        hour = rng.gauss(MORNING_PEAK_HOUR, PEAK_HOUR_STD)
+    elif roll < MORNING_PEAK_SHARE + EVENING_PEAK_SHARE:
+        hour = rng.gauss(EVENING_PEAK_HOUR, PEAK_HOUR_STD)
+    else:
+        hour = rng.uniform(5.0, 23.0)
+    return int(min(max(round(hour), 0), 23))
 
 
 def build_synthetic_training_dataframe(route_name, num_samples=DEFAULT_ROWS, seed=42):
@@ -68,13 +113,10 @@ def build_synthetic_training_dataframe(route_name, num_samples=DEFAULT_ROWS, see
             remaining_stops = max(total_stops - current_stop_seq - 1, 0)
             progress_ratio = current_stop_seq / float(max(total_stops - 1, 1))
 
-            timestamp = datetime.now() - timedelta(
-                days=rng.randint(0, 45),
-                hours=rng.randint(0, 23),
-                minutes=rng.randint(0, 59),
-            )
-            hour = timestamp.hour
-            day_of_week = timestamp.weekday()
+            # Hour of day drawn from a bimodal Gaussian (peaks at 08:00 and 17:00);
+            # day of week uniform across the week.
+            hour = _sample_hour_of_day(rng)
+            day_of_week = rng.randint(0, 6)
             is_rush_hour = (7 <= hour <= 9) or (16 <= hour <= 18)
             is_weekend = day_of_week >= 5
 
@@ -102,21 +144,23 @@ def build_synthetic_training_dataframe(route_name, num_samples=DEFAULT_ROWS, see
             remaining_ratio = max(0.05, ((1 - progress_ratio) * 0.6) + (distance_ratio * 0.4))
 
             if normalized_route == "a1":
-                passenger_low, passenger_high = (2, 18)
-                rush_passenger_bonus = (5, 10)
                 traffic_base = (15, 80)
                 traffic_rush = (60, 220)
                 stop_delay_bounds = (0.25, 0.55)
             else:
-                passenger_low, passenger_high = (0, 16)
-                rush_passenger_bonus = (6, 12)
                 traffic_base = (10, 110)
                 traffic_rush = (70, 260)
                 stop_delay_bounds = (0.35, 0.75)
 
-            passenger_count = rng.randint(passenger_low, passenger_high)
+            # Passenger count per stop drawn from a Poisson distribution whose rate
+            # rises during rush hour.
+            passenger_lambdas = ROUTE_PASSENGER_LAMBDAS.get(
+                normalized_route, DEFAULT_PASSENGER_LAMBDAS
+            )
+            lam = passenger_lambdas["peak"] if is_rush_hour else passenger_lambdas["offpeak"]
+            passenger_count = _poisson_sample(rng, lam)
+
             if is_rush_hour:
-                passenger_count += rng.randint(*rush_passenger_bonus)
                 traffic_delay = rng.uniform(*traffic_rush) * duration_scale
             else:
                 traffic_delay = rng.uniform(*traffic_base) * duration_scale
