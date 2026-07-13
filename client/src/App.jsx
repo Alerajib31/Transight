@@ -657,12 +657,17 @@ export default function App() {
 
           {/* Passengers Card */}
           <div className="bg-bg-card rounded-2xl p-5 border border-border">
-            <p className="text-xs uppercase tracking-widest text-text-secondary mb-1">
-              Passenger Count (YOLO)
-            </p>
+            <div className="mb-1 flex items-center gap-2">
+              <p className="text-xs uppercase tracking-widest text-text-secondary">
+                Passenger Count (YOLO)
+              </p>
+              <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
+                Simulated
+              </span>
+            </div>
             <p className="text-3xl font-bold">{passengers}</p>
             <p className="text-xs text-text-secondary mt-1">
-              {activeBus ? "Detected for the selected live bus context" : "Detected from video feed when a live bus is active"}
+              Proof-of-concept: YOLOv8 vision run on a sample video feed, not live Bristol passenger data.
             </p>
             {highDemand && (
               <div className="mt-3 flex items-center gap-2 bg-warning/10 text-warning rounded-lg px-3 py-2 text-sm font-medium">

@@ -1,0 +1,12 @@
+{
+  "route_name": "72",
+  "test_samples": 1500,
+  "test_seed": 99,
+  "baseline_method": "timetable_typical_duration_x_gps_progress",
+  "baseline_mae_minutes": 14.191,
+  "baseline_rmse_minutes": 15.513,
+  "xgboost_mae_minutes": 2.38,
+  "xgboost_rmse_minutes": 3.131,
+  "mae_improvement_pct": 83.2,
+  "rmse_improvement_pct": 79.8
+}
